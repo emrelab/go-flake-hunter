@@ -3,6 +3,7 @@ package clireplay
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -312,5 +313,69 @@ func broken() { undefined() }
 	}
 	if !strings.Contains(out, "does not build") {
 		t.Errorf("the report should name the real reason:\n%s", out)
+	}
+}
+
+func TestAuditS3_ResolvesOnlyCheckoutPackages(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	parent := t.TempDir()
+	root := filepath.Join(parent, "checkout")
+	outside := filepath.Join(parent, "outside")
+	nested := filepath.Join(root, "nested")
+	for dir, module := range map[string]string{root: "fixture/checkout", outside: "fixture/outside", nested: "fixture/nested"} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module "+module+"\n\ngo 1.24\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "root.go"), []byte("package checkout\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "outside_test.go"), []byte(`package outside
+import ("os"; "testing")
+func TestOutside(t *testing.T) { if err := os.WriteFile("ran", nil, 0600); err != nil { t.Fatal(err) } }
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "nested_test.go"), []byte(`package nested
+import "testing"
+var calls int
+func TestRepeat(t *testing.T) { calls++; if calls > 1 { t.Fatal("repeat") } }
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	for _, tc := range []struct {
+		name, pkg, test string
+		want            int
+	}{
+		{"traversal", "../outside", "TestOutside", domain.ExitNotReproduced},
+		{"symlink", "./linked", "TestOutside", domain.ExitNotReproduced},
+		{"nested", "fixture/nested", "TestRepeat", domain.ExitOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "symlink" {
+				if err := os.Symlink(outside, filepath.Join(root, "linked")); err != nil {
+					t.Skipf("symlink unavailable: %v", err)
+				}
+			}
+			log := filepath.Join(t.TempDir(), "failure.json")
+			data := fmt.Appendf(nil, "{\"Action\":\"fail\",\"Package\":%q,\"Test\":%q}\n", tc.pkg, tc.test)
+			if err := os.WriteFile(log, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			code, out, stderr := clitest.Run("repro", "--from-json", log)
+			if _, err := os.Stat(filepath.Join(outside, "ran")); !os.IsNotExist(err) {
+				t.Errorf("test outside checkout was executed: %v", err)
+				_ = os.Remove(filepath.Join(outside, "ran"))
+			}
+			if code != tc.want || tc.want != domain.ExitOK && !strings.Contains(stderr, "outside this checkout") {
+				t.Errorf("repro exit=%d, want %d\n%s\n%s", code, tc.want, out, stderr)
+			}
+		})
 	}
 }

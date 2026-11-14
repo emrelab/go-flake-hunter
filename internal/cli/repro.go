@@ -6,7 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/emrelab/go-flake-hunter/internal/domain"
 	"github.com/emrelab/go-flake-hunter/internal/gotest"
@@ -108,25 +111,29 @@ func reproFromJSON(ctx context.Context, fromJSON string, o huntOptions, out IO) 
 	}
 	_, _ = fmt.Fprintf(out.Stderr, "from-json: %d failing tests\n", len(suspects))
 
+	root := "."
+	if dir, err := gitOutput(ctx, root, "rev-parse", "--show-toplevel"); err == nil {
+		root = dir
+	}
+	roots, err := checkoutModules(ctx, root)
+	if err != nil {
+		return err
+	}
+	dirs, err := gotest.ResolveImportDirs(ctx, roots)
+	if err != nil {
+		return err
+	}
 	s := newScanner(out, o, "")
-	dirs := map[string]string{} // import path -> directory; "" = unresolvable (warned once)
+	warned := map[string]bool{}
 	var runErr error
 	for _, sus := range suspects {
-		dir, resolved := dirs[sus.Package]
-		if !resolved {
-			found, err := gotest.ExpandPatterns(ctx, []string{sus.Package})
-			if err != nil || len(found) != 1 {
-				// Moved, vendored or foreign package: warn and keep the other
-				// suspects moving — one stale log line must not veto the rest.
-				_, _ = fmt.Fprintf(out.Stderr, "  skip %s: package %s cannot be resolved here\n",
-					sus.Name, sus.Package)
-				dirs[sus.Package] = ""
-				continue
-			}
-			dir = found[0]
-			dirs[sus.Package] = dir
-		}
+		dir := dirs[sus.Package]
 		if dir == "" {
+			if !warned[sus.Package] {
+				_, _ = fmt.Fprintf(out.Stderr, "  skip %s: package %s is outside this checkout or cannot be resolved\n",
+					sus.Name, sus.Package)
+				warned[sus.Package] = true
+			}
 			continue
 		}
 
@@ -149,4 +156,27 @@ func reproFromJSON(ctx context.Context, fromJSON string, o huntOptions, out IO) 
 		return runErr
 	}
 	return s.outcome(true)
+}
+
+// checkoutModules finds module roots without following directory symlinks.
+func checkoutModules(ctx context.Context, root string) ([]string, error) {
+	var roots []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		name := entry.Name()
+		if entry.IsDir() && path != root &&
+			(strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || name == "vendor" || name == "testdata") {
+			return filepath.SkipDir
+		}
+		if name == "go.mod" && entry.Type().IsRegular() {
+			roots = append(roots, filepath.Dir(path))
+		}
+		return nil
+	})
+	return roots, err
 }

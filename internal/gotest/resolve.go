@@ -28,6 +28,10 @@ func ResolveImportDirs(ctx context.Context, roots []string) (map[string]string, 
 		if err != nil {
 			return nil, domain.Wrap(domain.ErrUsage, "%s", root)
 		}
+		realRoot, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			return nil, domain.Wrap(domain.ErrUsage, "could not resolve %s: %v", root, err)
+		}
 		cmd := exec.CommandContext(ctx, "go", "list", "-e", "-f", "{{.ImportPath}}\t{{.Dir}}", "./...")
 		cmd.Dir = abs
 		var stdout, stderr bytes.Buffer
@@ -48,6 +52,17 @@ func ResolveImportDirs(ctx context.Context, roots []string) (map[string]string, 
 			// placeholder; neither names a directory this checkout owns.
 			if !ok || importPath == "" || dir == "" || strings.Contains(importPath, "...") {
 				continue
+			}
+			realDir, err := filepath.EvalSymlinks(dir)
+			if err != nil {
+				continue
+			}
+			rel, err := filepath.Rel(realRoot, realDir)
+			if err != nil || !filepath.IsLocal(rel) {
+				continue
+			}
+			if previous, ok := out[importPath]; ok && previous != dir {
+				return nil, domain.Wrap(domain.ErrUsage, "package %s has more than one checkout directory", importPath)
 			}
 			out[importPath] = dir
 			lines++
