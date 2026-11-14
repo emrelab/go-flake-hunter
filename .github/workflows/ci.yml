@@ -149,6 +149,12 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           "$(go env GOPATH)/bin/govulncheck" ./...
 
+      # The audit's P0.0 list asks CI to publish the coverage total. No
+      # threshold: a number nobody agreed on would either be ignored or
+      # block honest work; the trend is what the baseline is for.
+      - name: coverage
+        run: make cover
+
   # Dogfooding: our own tool hunts flakes in our own repo. If a witness file
   # or a leaked global makes our suite order-dependent, this step goes red.
   # Exit 4 (budget exhausted) is inconclusive, not a failure: it warns and
