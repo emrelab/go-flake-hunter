@@ -9,7 +9,7 @@
 
 > Reproduce the flake in 30 seconds instead of 30 minutes — and leave a permanent regression test in the repo.
 
-209 tests + 2 fuzz targets · CI on linux/macos/windows + a nightly sweep · zero dependencies ·
+224 tests + 2 fuzz targets · CI on linux/macos/windows + a nightly sweep · zero dependencies ·
 three real upstream flake cases reduced to witnesses ([evidence](docs/real-world/README.md))
 
 Finds flaky Go-test failures caused by **order, parallelism, repetition and
