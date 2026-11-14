@@ -28,9 +28,12 @@ suite.
 ## Testing
 
 ```sh
-make test          # fast unit tests
+make test          # full suite: -race, real `go test` subprocesses (~10 min)
+make test-short    # unit tests only (seconds) — use this while iterating
 make test-repeat   # -count=10: does our own tool leak its own state?
 make fixtures      # build every fixture module separately
+make lint          # golangci-lint, the same gate CI runs
+make vuln          # govulncheck: stdlib + toolchain CVEs
 make cover
 ```
 

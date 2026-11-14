@@ -101,6 +101,36 @@ jobs:
       - name: unit tests
         run: go test -race -short ./...
 
+  # Gates that need one OS, not three: lint, the Action's step scripts, and the
+  # vulnerability scan. Pinned module versions, not @latest: a CI tool that
+  # drifts silently is the same defect as an unpinned action ref.
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+          cache: false
+
+      - name: lint
+        run: |
+          set -euo pipefail
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+          "$(go env GOPATH)/bin/golangci-lint" run ./...
+
+      # action.yml's step scripts, proven locally without GitHub. Kept out of
+      # the Windows/macOS matrix: the script is bash, and a green smoke there
+      # would only prove Git Bash, which is not the action's runtime.
+      - name: action smoke
+        run: make smoke
+
+      - name: govulncheck
+        run: |
+          set -euo pipefail
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
   # Dogfooding: our own tool hunts flakes in our own repo. If a witness file
   # or a leaked global makes our suite order-dependent, this step goes red.
   # Exit 4 (budget exhausted) is inconclusive, not a failure: it warns and

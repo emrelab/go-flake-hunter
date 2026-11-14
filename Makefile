@@ -1,4 +1,4 @@
-.PHONY: all build test test-repeat cost vet fmt cover fixtures clean run smoke demo auto auto-next auto-verify auto-digest
+.PHONY: all build test test-short test-repeat lint vuln cost vet fmt cover fixtures clean run smoke demo auto auto-next auto-verify auto-digest
 
 BINARY := go-flake-hunter
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -14,6 +14,22 @@ run: build
 
 test:
 	go test -race ./...
+
+# Fast loop: unit tests only. The integration layer drives real `go test`
+# subprocesses and belongs to `make test` / CI; a red unit test is what a
+# contributor wants to hear about in seconds.
+test-short:
+	go test -race -short ./...
+
+# Static analysis gate. Same binary CI runs, so a local pass means the job
+# passes; no config file on purpose — the defaults are the standard here.
+lint:
+	golangci-lint run ./...
+
+# Known vulnerabilities in the stdlib and in the toolchain this binary ships
+# with. Zero dependencies means no module supply chain, not no CVEs.
+vuln:
+	govulncheck ./...
 
 # action.yml's step scripts are validated locally, without GitHub.
 smoke:
