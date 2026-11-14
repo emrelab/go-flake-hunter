@@ -201,7 +201,15 @@ func (s Store) List() ([]string, error) {
 			mod: info.ModTime().UnixNano(),
 		})
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].mod > items[j].mod })
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].mod != items[j].mod {
+			return items[i].mod > items[j].mod
+		}
+		// Equal mtimes happen: a fresh clone checks every file out with the
+		// same second, and "newest by mtime" then depended on directory
+		// order. The id breaks the tie so two clones agree (K5).
+		return items[i].id > items[j].id
+	})
 	out := make([]string, len(items))
 	for i, it := range items {
 		out[i] = it.id

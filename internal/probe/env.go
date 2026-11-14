@@ -34,8 +34,12 @@ func (Env) Name() string { return "env" }
 func (Env) Applicable(tgt Target) bool { return len(envKeys(tgt)) > 0 }
 
 // InapplicableReason implements GateReason.
+//
+// The wording names the real gap: the call exists, its key is not a literal,
+// so there is no value to vary. Saying "no read" sent people looking for code
+// the AST had already found (K4).
 func (Env) InapplicableReason(Target) string {
-	return "no literal os.Getenv/LookupEnv read"
+	return "os.Getenv read, but no literal key"
 }
 
 // Kind implements Probe.
