@@ -12,6 +12,9 @@ import (
 
 // Text writes the human-readable summary of a found witness.
 func Text(w io.Writer, c domain.Capsule) error {
+	if c.Status == domain.StatusPartial {
+		return Partial(w, c, nil, c.ID, "")
+	}
 	v := c.Witness
 	var b strings.Builder
 
@@ -181,7 +184,7 @@ func attemptReason(a AttemptInfo) string {
 // answer: the next run can start from the probes already known to say nothing.
 func Partial(w io.Writer, c domain.Capsule, attempts []AttemptInfo, path, hint string) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "\nno result: %s (%s)\n", c.Target.Victim, c.Note)
+	fmt.Fprintf(&b, "\ninconclusive: %s (%s)\n", c.Target.Victim, c.Note)
 	fmt.Fprintf(&b, "  package      : %s\n", c.Target.Package)
 	if len(attempts) > 0 {
 		b.WriteString("  tried:\n")

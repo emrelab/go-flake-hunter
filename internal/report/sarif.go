@@ -58,6 +58,7 @@ func sarifRules() []sarifRule {
 		}
 	}
 	return []sarifRule{
+		mk("go-flake-hunter/inconclusive", "inconclusive test investigation", "The investigation ended before a witness was confirmed."),
 		mk("go-flake-hunter/repeat", "repeat-dependent flake",
 			"The test fails when run again in the same process: state leaks between runs of the same test. Reproduce with `go test -count=N`; go-flake-hunter's capsule records the count that proved it."),
 		mk("go-flake-hunter/order", "order-dependent flake",
@@ -70,6 +71,29 @@ func sarifRules() []sarifRule {
 }
 
 func sarifForResult(c domain.Capsule) sarifResult {
+	r := sarifResult{}
+	if c.Status == domain.StatusPartial {
+		r = sarifResult{
+			RuleID: "go-flake-hunter/inconclusive", Level: "note", Kind: "review",
+			Message: sarifText{c.Target.Package + ":" + c.Target.Victim + " is inconclusive: " + c.Note},
+		}
+	} else {
+		r = sarifFlakeResult(c)
+	}
+	if c.Target.VictimFile != "" && c.Target.VictimLine > 0 {
+		// RelDir is the path as the user invoked it (repo-root-relative in CI);
+		// %SRCROOT% lets code scanning resolve it against the checkout root.
+		uri := path.Join(c.Target.RelDir, c.Target.VictimFile)
+		uri = strings.ReplaceAll(uri, "\\", "/")
+		r.Locations = []sarifLocation{{Physical: sarifPhysical{
+			Artifact: sarifArtifact{URI: uri, URIBaseID: "%SRCROOT%"},
+			Region:   sarifRegion{StartLine: c.Target.VictimLine},
+		}}}
+	}
+	return r
+}
+
+func sarifFlakeResult(c domain.Capsule) sarifResult {
 	v := c.Witness
 	var b strings.Builder
 	b.WriteString(c.Target.Victim)
@@ -107,16 +131,6 @@ func sarifForResult(c domain.Capsule) sarifResult {
 		r.Level = "note"
 		r.Kind = "review"
 		r.Properties = map[string]any{"status": c.Status, "observation": c.Observation}
-	}
-	if c.Target.VictimFile != "" && c.Target.VictimLine > 0 {
-		// RelDir is the path as the user invoked it (repo-root-relative in CI);
-		// %SRCROOT% lets code scanning resolve it against the checkout root.
-		uri := path.Join(c.Target.RelDir, c.Target.VictimFile)
-		uri = strings.ReplaceAll(uri, "\\", "/")
-		r.Locations = []sarifLocation{{Physical: sarifPhysical{
-			Artifact: sarifArtifact{URI: uri, URIBaseID: "%SRCROOT%"},
-			Region:   sarifRegion{StartLine: c.Target.VictimLine},
-		}}}
 	}
 	return r
 }

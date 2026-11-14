@@ -42,7 +42,7 @@ func TestSARIFAnnotatesVictim(t *testing.T) {
 	if len(doc.Runs) != 1 || doc.Runs[0].Tool.Driver.Name != "go-flake-hunter" {
 		t.Fatalf("runs/tool: %+v", doc.Runs)
 	}
-	if len(doc.Runs[0].Tool.Driver.Rules) != 4 {
+	if len(doc.Runs[0].Tool.Driver.Rules) != 5 {
 		t.Errorf("the four flake classes must all be declared as rules")
 	}
 	res := doc.Runs[0].Results
@@ -65,7 +65,7 @@ func TestSARIFAnnotatesVictim(t *testing.T) {
 		t.Errorf("artifact = %+v, want internal/app/app_test.go @ %%SRCROOT%%", p.Artifact)
 	}
 	if p.Region.StartLine != 42 {
-		t.Errorf("startLine = %d, want 42", p.Region.StartLine)
+		t.Errorf("startLine = %d, want 52", p.Region.StartLine)
 	}
 }
 

@@ -584,7 +584,13 @@ func (s *scanner) writePartial(ctx context.Context, t domain.TestID, dir, relDir
 	if s.o.format == "json" || s.o.format == "sarif" {
 		// The single document is written by flush; the note belongs on stderr
 		// so the artifact stays clean.
-		_, _ = fmt.Fprintf(s.out.Stderr, "%s: %s\n", c.Target.Victim, c.Note)
+		_, _ = fmt.Fprintf(s.out.Stderr, "%s: inconclusive (%s)\n", c.Target.Victim, c.Note)
+		return cause
+	}
+	if s.o.format == "markdown" {
+		if err := report.Markdown(s.out.Stdout, c); err != nil {
+			return err
+		}
 		return cause
 	}
 	if err := report.Partial(s.out.Stdout, c, infos, path, partialHint(cause)); err != nil {

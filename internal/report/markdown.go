@@ -14,6 +14,11 @@ import (
 // text wraps lines out of shape and JSON is unreadable; the table is the only
 // format between them — it renders on GitHub and looks honest in a terminal.
 func Markdown(w io.Writer, c domain.Capsule) error {
+	if c.Status == domain.StatusPartial {
+		_, err := fmt.Fprintf(w, "### inconclusive: %s (partial)\n\n| field | value |\n|---|---|\n| package | %s |\n| status | %s |\n| capsule | `%s` |\n| note | %s |\n",
+			escapePipe(c.Target.Victim), escapePipe(c.Target.Package), c.Status, c.ID, escapePipe(c.Note))
+		return err
+	}
 	var b strings.Builder
 	v := c.Witness
 

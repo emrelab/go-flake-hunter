@@ -58,3 +58,28 @@ func TestAuditC4_AlwaysFailingTestIsBroken(t *testing.T) {
 		t.Errorf("gated hunt exit=%d stdout=%s stderr=%s", code, out, stderr)
 	}
 }
+
+func TestAuditC5_PartialIsInconclusiveOnEverySurface(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	dir := clitest.FixtureDir(t, "order-basic")
+	for _, format := range []string{"text", "markdown", "sarif", "json"} {
+		t.Run(format, func(t *testing.T) {
+			store := t.TempDir()
+			code, out, stderr := clitest.Run("hunt", dir, "--budget", "1", "--format", format, "--capsule-dir", store)
+			if code != 4 || !strings.Contains(out, "inconclusive") || strings.Contains(out, "is flaky") || strings.Contains(out, "flake found") {
+				t.Errorf("hunt exit=%d stdout=%s stderr=%s", code, out, stderr)
+			}
+			if format == "sarif" && (!strings.Contains(out, `"ruleId": "go-flake-hunter/inconclusive"`) || !strings.Contains(out, `"level": "note"`)) {
+				t.Errorf("incorrect SARIF result: %s", out)
+			}
+			if format == "text" {
+				code, out, stderr = clitest.Run("explain", "--capsule-dir", store)
+				if code != 0 || !strings.Contains(out, "inconclusive") || !strings.Contains(out, "fixture/orderbasic") {
+					t.Errorf("explain exit=%d stdout=%s stderr=%s", code, out, stderr)
+				}
+			}
+		})
+	}
+}

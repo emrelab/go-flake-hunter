@@ -15,7 +15,7 @@ import (
 // tool crashed". Flakes is always an array, empty when nothing was found.
 type RunReport struct {
 	Schema   string                 `json:"schema"`
-	Flakes   []domain.Capsule       `json:"flakes"`
+	Flakes   []capsuleReport        `json:"flakes"`
 	Runs     int                    `json:"runs"`
 	MaxRuns  int                    `json:"maxRuns,omitempty"`
 	Packages []domain.PackageResult `json:"packages"`
@@ -23,17 +23,18 @@ type RunReport struct {
 
 // JSONRun writes the run report.
 func JSONRun(w io.Writer, flakes []domain.Capsule, runs, maxRuns int, packages []domain.PackageResult) error {
-	if flakes == nil {
-		flakes = []domain.Capsule{}
-	}
 	if packages == nil {
 		packages = []domain.PackageResult{}
+	}
+	rendered := make([]capsuleReport, 0, len(flakes))
+	for _, c := range flakes {
+		rendered = append(rendered, asCapsuleReport(c))
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(RunReport{
 		Schema:   domain.SchemaVersion,
-		Flakes:   flakes,
+		Flakes:   rendered,
 		Runs:     runs,
 		MaxRuns:  maxRuns,
 		Packages: packages,
@@ -44,5 +45,18 @@ func JSONRun(w io.Writer, flakes []domain.Capsule, runs, maxRuns int, packages [
 func JSON(w io.Writer, c domain.Capsule) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(c)
+	return enc.Encode(asCapsuleReport(c))
+}
+
+type capsuleReport struct {
+	domain.Capsule
+	Conclusion string `json:"conclusion,omitempty"`
+}
+
+func asCapsuleReport(c domain.Capsule) capsuleReport {
+	r := capsuleReport{Capsule: c}
+	if c.Status == domain.StatusPartial {
+		r.Conclusion = "inconclusive"
+	}
+	return r
 }
