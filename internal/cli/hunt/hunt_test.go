@@ -183,8 +183,8 @@ func TestHuntRaceFlag(t *testing.T) {
 	if code != domain.ExitOK {
 		t.Fatalf("code = %d stderr=%s", code, errOut.String())
 	}
-	if !strings.Contains(out.String(), "go test -race") {
-		t.Errorf("-race missing from reproduce command:\n%s", out.String())
+	if !strings.Contains(out.String(), "witness reproduced under -race") {
+		t.Errorf("-race confirmation missing from report:\n%s", out.String())
 	}
 
 	entries, err := os.ReadDir(store)

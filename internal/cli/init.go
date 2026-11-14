@@ -49,23 +49,29 @@ jobs:
       # Note: soft mode on first adoption so CI is not broken. For a gate,
       # add --fail-on-flake and delete continue-on-error.
       - name: hunt flakes
+        id: hunt
         continue-on-error: true
         run: |
-          set -o pipefail
+          set -uo pipefail
           go run github.com/emrelab/go-flake-hunter/cmd/go-flake-hunter@v0.3.0 hunt ./... \
-            --format markdown --budget 200 --timeout 10m | tee go-flake-hunter-report.md
+            --capsule-dir "$RUNNER_TEMP/capsules" --format markdown --budget 200 --timeout 10m | tee go-flake-hunter-report.md
+          status=${PIPESTATUS[0]}
+          shopt -s nullglob
+          capsules=("$RUNNER_TEMP"/capsules/gfh_*.json)
+          if [ "${#capsules[@]}" -gt 0 ]; then echo "capsules=true" >> "$GITHUB_OUTPUT"; fi
+          exit "$status"
 
       - name: attach report
         if: always()
         run: cat go-flake-hunter-report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: store capsules
-        if: always()
+        if: always() && steps.hunt.outputs.capsules == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: go-flake-hunter-capsules
-          path: "**/.go-flake-hunter/*.json"
-          if-no-files-found: ignore
+          name: go-flake-hunter-capsules-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/capsules/gfh_*.json
+          if-no-files-found: error
 `
 
 // initCmd writes the CI scaffolding a repository needs.

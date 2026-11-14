@@ -123,7 +123,25 @@ jobs:
       # the Windows/macOS matrix: the script is bash, and a green smoke there
       # would only prove Git Bash, which is not the action's runtime.
       - name: action smoke
+        env:
+          GFH_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/smoke-capsules
         run: make smoke
+      - uses: actions/upload-artifact@v7
+        with:
+          name: smoke-capsule-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/smoke-capsules/gfh_*.json
+          if-no-files-found: error
+      - uses: actions/download-artifact@v8
+        with:
+          name: smoke-capsule-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/smoke-downloaded
+      - name: verify capsule round trip
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          capsules=("$RUNNER_TEMP"/smoke-downloaded/gfh_*.json)
+          test "${#capsules[@]}" = 1
+          cmp "${capsules[0]}" "$RUNNER_TEMP/smoke-capsules/${capsules[0]##*/}"
 
       - name: govulncheck
         run: |
@@ -148,6 +166,7 @@ jobs:
       - name: build
         run: make build
       - name: hunt our own packages
+        id: hunt
         run: |
           set -uo pipefail
           # --short: our own cli package carries heavy integration tests that
@@ -161,19 +180,22 @@ jobs:
           rc=0
           # 600 runs: the sweep's run count is deterministic; measured on the
           # current tree at just under that. 15m wall for slower runners.
-          ./go-flake-hunter hunt ./... --fail-on-flake --short --budget 600 --timeout 15m || rc=$?
+          ./go-flake-hunter hunt ./... --capsule-dir "$RUNNER_TEMP/capsules" --fail-on-flake --short --budget 600 --timeout 15m || rc=$?
+          shopt -s nullglob
+          capsules=("$RUNNER_TEMP"/capsules/gfh_*.json)
+          if [ "${#capsules[@]}" -gt 0 ]; then echo "capsules=true" >> "$GITHUB_OUTPUT"; fi
           if [ "$rc" -eq 4 ]; then
             echo "::warning::self-hunt ran out of budget — inconclusive, nightly carries the sweep"
             exit 0
           fi
           exit "$rc"
       - name: save capsules
-        if: always()
+        if: always() && steps.hunt.outputs.capsules == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: self-hunt-capsules
-          path: "**/.go-flake-hunter/*.json"
-          if-no-files-found: ignore
+          name: self-hunt-capsules-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/capsules/gfh_*.json
+          if-no-files-found: error
           retention-days: 14
 
   # The README is a claim about the binary. This job makes the claim testable.

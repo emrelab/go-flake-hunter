@@ -37,6 +37,10 @@ inputs:
     description: Token used to download the prebuilt release binary
     required: false
     default: ${{ github.token }}
+  artifact-name:
+    description: Override the capsule artifact name for multiple invocations in the same job
+    required: false
+    default: ""
   upload-sarif:
     description: "Upload findings as SARIF to GitHub code scanning (needs security-events: write)"
     required: false
@@ -152,7 +156,9 @@ runs:
       run: |
         set -uo pipefail
         report="$RUNNER_TEMP/go-flake-hunter-report.$FS_FORMAT"
-        args=(hunt $FS_PATHS --format "$FS_FORMAT" --budget "$FS_BUDGET" --timeout "$FS_TIMEOUT")
+        store=$(mktemp -d "$RUNNER_TEMP/gfh-store.XXXXXX") || exit 10
+        stage="$RUNNER_TEMP/capsules/${store##*/}"
+        args=(hunt $FS_PATHS --capsule-dir "$store" --format "$FS_FORMAT" --budget "$FS_BUDGET" --timeout "$FS_TIMEOUT")
         [ "$FS_FAIL" = "true" ] && args+=(--fail-on-flake)
         # One hunt, two consumers: the report keeps its format, the SARIF
         # side file goes to code scanning. A second hunt would double the
@@ -170,6 +176,12 @@ runs:
         esac
         echo "flakes=${count:-0}" >> "$GITHUB_OUTPUT"
         echo "report=$report" >> "$GITHUB_OUTPUT"
+        shopt -s nullglob
+        capsules=("$store"/gfh_*.json)
+        if [ "${#capsules[@]}" -gt 0 ]; then
+          mkdir -p "$stage" && cp "${capsules[@]}" "$stage/" || exit 10
+          echo "capsules=$stage" >> "$GITHUB_OUTPUT"
+        fi
 
         # Exit code contract: 0 clean, 1 flake (gate), 3 not found in repro,
         # 4 budget, 5 unsupported, 6 build. hunt returns 0 when clean.
@@ -196,10 +208,10 @@ runs:
         category: go-flake-hunter
 
     - name: save capsules
-      if: always()
+      if: always() && steps.hunt.outputs.capsules != ''
       uses: actions/upload-artifact@v7
       with:
-        name: go-flake-hunter-capsules
-        path: "**/.go-flake-hunter/*.json"
-        if-no-files-found: ignore
+        name: ${{ inputs.artifact-name || format('go-flake-hunter-capsules-{0}-{1}-{2}', github.job, strategy.job-index || '0', github.run_attempt) }}
+        path: ${{ steps.hunt.outputs.capsules }}
+        if-no-files-found: error
         retention-days: 30

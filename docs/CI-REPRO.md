@@ -85,20 +85,24 @@ jobs:
           set +e
           "$RUNNER_TEMP/go-flake-hunter" repro \
             --from-json "$RUNNER_TEMP/go-test.json" \
+            --capsule-dir "$RUNNER_TEMP/capsules" \
             --format markdown --budget 200 --timeout 10m > "$RUNNER_TEMP/repro.md"
           echo "code=$?" >> "$GITHUB_OUTPUT"
+          shopt -s nullglob
+          capsules=("$RUNNER_TEMP"/capsules/gfh_*.json)
+          if [ "${#capsules[@]}" -gt 0 ]; then echo "capsules=true" >> "$GITHUB_OUTPUT"; fi
 
       - name: add findings to the job summary
         if: steps.repro.outputs.code == '0'
         run: cat "$RUNNER_TEMP/repro.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: keep the capsules
-        if: always()
+        if: always() && steps.repro.outputs.capsules == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: go-flake-hunter-capsules
-          path: "**/.go-flake-hunter/*.json"
-          if-no-files-found: ignore
+          name: go-flake-hunter-capsules-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/capsules/gfh_*.json
+          if-no-files-found: error
 ```
 {% endraw %}
 

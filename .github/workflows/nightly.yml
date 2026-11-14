@@ -57,20 +57,24 @@ jobs:
       - name: build
         run: make build
       - name: hunt our own packages (full)
+        id: hunt
         run: |
           set -uo pipefail
           rc=0
-          ./go-flake-hunter hunt ./... --fail-on-flake --budget 1000 --timeout 40m || rc=$?
+          ./go-flake-hunter hunt ./... --capsule-dir "$RUNNER_TEMP/capsules" --fail-on-flake --budget 1000 --timeout 40m || rc=$?
+          shopt -s nullglob
+          capsules=("$RUNNER_TEMP"/capsules/gfh_*.json)
+          if [ "${#capsules[@]}" -gt 0 ]; then echo "capsules=true" >> "$GITHUB_OUTPUT"; fi
           if [ "$rc" -eq 4 ]; then
             echo "::warning::full self-hunt ran out of budget — raise --budget/--timeout or file it"
             exit 0
           fi
           exit "$rc"
       - name: save capsules
-        if: always()
+        if: always() && steps.hunt.outputs.capsules == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: nightly-hunt-capsules
-          path: "**/.go-flake-hunter/*.json"
-          if-no-files-found: ignore
+          name: nightly-hunt-capsules-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/capsules/gfh_*.json
+          if-no-files-found: error
           retention-days: 14

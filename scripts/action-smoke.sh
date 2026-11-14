@@ -57,38 +57,31 @@ export FS_PATHS="./..." FS_BUDGET="200" FS_TIMEOUT="10m" FS_FORMAT="markdown" FS
 mkdir -p "$RUNNER_TEMP"; : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"
 cd "$REPO"
 
-# action.yml "hunt flakes" step script — the go-flake-hunter command is the local binary.
+# Execute the composite action's own shell block with the local binary on PATH.
+export PATH="$SCRATCH:$PATH" FS_SARIF=false
 run_hunt_step() {
-  report="$RUNNER_TEMP/go-flake-hunter-report.$FS_FORMAT"
-  args=(hunt $FS_PATHS --format "$FS_FORMAT" --budget "$FS_BUDGET" --timeout "$FS_TIMEOUT")
-  [ "$FS_FAIL" = "true" ] && args+=(--fail-on-flake)
-
-  "$BIN" "${args[@]}" | tee "$report"
-  status=${PIPESTATUS[0]}
-
-  case "$FS_FORMAT" in
-    json) count=$(grep -c '"status": "confirmed"' "$report" || true) ;;
-    *)    count=$(grep -Ec '^(### flake:|flake found:)' "$report" || true) ;;
-  esac
-  echo "flakes=${count:-0}" >> "$GITHUB_OUTPUT"
-  echo "report=$report" >> "$GITHUB_OUTPUT"
-  return "$status"
+  awk '
+    /^    - name: hunt flakes$/ { step=1; next }
+    step && /^    - name:/ { exit }
+    step && /^      run: \|/ { body=1; next }
+    body { sub(/^        /, ""); print }
+  ' "$ROOT/action.yml" | bash
 }
 
 echo "== 2-6. step scripts + checks =="
 run_hunt_step; status=$?
 report="$RUNNER_TEMP/go-flake-hunter-report.$FS_FORMAT"
 [ -f "$report" ] && cat "$report" >> "$GITHUB_STEP_SUMMARY"
-# @actions/glob's `**/.go-flake-hunter/*.json` pattern also matches zero segments;
-# the local equivalent uses find (no globstar in bash 3.2).
-capsule_count=$(find . -name '*.json' -path '*.go-flake-hunter*' | grep -c . || true)
+shopt -s nullglob
+stage=$(sed -n 's/^capsules=//p' "$GITHUB_OUTPUT")
+capsules=("$stage"/gfh_*.json)
 
 fail=0
 [ "$status" = "0" ] || { echo "FAIL: expected exit 0 with the gate off, got $status"; fail=1; }
 grep -q "flakes=1" "$GITHUB_OUTPUT" || { echo "FAIL: GITHUB_OUTPUT flakes=1: $(cat "$GITHUB_OUTPUT")"; fail=1; }
 grep -q "^### flake: " "$report" || { echo "FAIL: no markdown heading"; fail=1; }
 [ -s "$GITHUB_STEP_SUMMARY" ] || { echo "FAIL: step summary empty"; fail=1; }
-[ "$capsule_count" -ge 1 ] || { echo "FAIL: no capsule artifact"; fail=1; }
+[ "${#capsules[@]}" -eq 1 ] || { echo "FAIL: expected one staged capsule, got ${#capsules[@]}"; fail=1; }
 [ -z "$(find . -name 'zz_goflakehunter_witness_*')" ] || { echo "FAIL: witness leftovers"; fail=1; }
 
 # json format: the count must still be 1 and the output must be a single valid document.
@@ -104,4 +97,7 @@ FS_FORMAT=markdown
 FS_FAIL=true; : > "$GITHUB_OUTPUT"; run_hunt_step >/dev/null; gated=$?
 [ "$gated" = "1" ] || { echo "FAIL: expected exit 1 with the gate on, got $gated"; fail=1; }
 
+if [ "$fail" = "0" ] && [ -n "${GFH_SMOKE_ARTIFACT_DIR:-}" ]; then
+  mkdir -p "$GFH_SMOKE_ARTIFACT_DIR" && cp "${capsules[@]}" "$GFH_SMOKE_ARTIFACT_DIR/" || exit 1
+fi
 if [ "$fail" = "0" ]; then echo "SMOKE: PASSED ✅"; else echo "SMOKE: FAILED ❌"; exit 1; fi
