@@ -3,12 +3,12 @@ layout: default
 title: CI reproduction recipe
 ---
 
-# CI recipe: a red test log → witness → one PR comment
+# CI recipe: a red test log → witness → job summary
 
 The pieces already ship; this page is the glue between them (#17).
 
 ```
-red `go test -json` log  →  go-flake-hunter repro --from-json  →  witness  →  one PR comment
+red `go test -json` log  →  go-flake-hunter repro --from-json  →  witness  →  job summary
 ```
 
 The point is that the developer pastes nothing. CI already paid for the discovery
@@ -18,10 +18,9 @@ The point is that the developer pastes nothing. CI already paid for the discover
 
 - **Post only on exit `0`.** Exit `3` means "did not reproduce within budget" and
   exit `4` means "budget exhausted" — in both cases there is no witness to show,
-  and a comment saying "found a flake" would be a lie. Silence is the answer.
-- **One comment, updated in place.** Without a marker every red build stacks
-  another identical comment on the PR.
-- **A log is not evidence.** The comment says which test, which polluter and the
+  and a summary saying "found a flake" would be a lie. Silence is the answer.
+- **Read-only token.** The same job summary works for internal and fork PRs.
+- **A log is not evidence.** The summary says which test, which polluter and the
   witness command; the capsule is the artifact.
 
 ---
@@ -36,7 +35,6 @@ already runs `go test`.
 ```yaml
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   test:
@@ -63,7 +61,7 @@ jobs:
 
   repro:
     needs: test
-    if: needs.test.result == 'failure'
+    if: failure()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -76,33 +74,23 @@ jobs:
           name: go-test-json
           path: ${{ runner.temp }}
 
-      # Built from source on purpose: this job wants the same commit that just
-      # failed, not a released binary.
       - name: install go-flake-hunter
-        run: go build -o "$RUNNER_TEMP/go-flake-hunter" ./cmd/go-flake-hunter
+        run: GOBIN="$RUNNER_TEMP" go install github.com/emrelab/go-flake-hunter/cmd/go-flake-hunter@v0.3.0
 
       - name: shrink the failures to a witness
         id: repro
         # `--format markdown` is already a PR-comment body. Budget is deliberately
         # smaller than a full hunt: this job has suspects, not a search space.
         run: |
-          set -uo pipefail
+          set +e
           "$RUNNER_TEMP/go-flake-hunter" repro \
             --from-json "$RUNNER_TEMP/go-test.json" \
             --format markdown --budget 200 --timeout 10m > "$RUNNER_TEMP/repro.md"
           echo "code=$?" >> "$GITHUB_OUTPUT"
 
-      # Exit 0 = a confirmed witness. 3/4 = no witness, and no comment.
-      - name: comment on the PR
-        if: steps.repro.outputs.code == '0' && github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          set -uo pipefail
-          printf '<!-- go-flake-hunter-repro -->\n' | cat - "$RUNNER_TEMP/repro.md" > "$RUNNER_TEMP/body.md"
-          printf '\n_Reproduced from the failing CI log; the capsule is attached to this run._\n' >> "$RUNNER_TEMP/body.md"
-          gh pr comment "$PR" --body-file "$RUNNER_TEMP/body.md" --edit-last --create-if-none
+      - name: add findings to the job summary
+        if: steps.repro.outputs.code == '0'
+        run: cat "$RUNNER_TEMP/repro.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: keep the capsules
         if: always()
@@ -145,17 +133,5 @@ below). The real output, indented because it contains a fence of its own:
   repository the log came from.
 - Exit codes: `0` witness found, `3` not reproduced, `4` budget exhausted
   (`internal/cli/repro.go:77-83`).
-- `gh pr comment --edit-last --create-if-none` (gh ≥ 2.45) is the upsert: it edits
-  this job's previous comment when there is one and creates it otherwise, so a
-  PR sees one witness block, not one per red build.
-
-**Not** verified here: the workflow itself. It is a template — the `needs`/`if`
-plumbing, artifact paths and the `gh` token scopes belong to your repository.
-Test it on a branch with an intentionally red test before trusting it on `main`.
-
-## Why this is opt-in
-
-Posting to a PR is a write outside the repository. A tool that comments
-unprompted gets uninstalled, and the soft-mode default of the packaged Action is
-deliberate: findings annotate, they do not block, and they do not speak unless
-asked.
+The workflow uses `failure()` so the repro job runs after a failed test job.
+The job summary uses the workflow’s read-only permissions, including on fork PRs.

@@ -33,6 +33,9 @@ on:
   schedule:
     - cron: "0 3 * * 1" # weekly: so new flakes do not pile up silently
 
+permissions:
+  contents: read
+
 jobs:
   hunt:
     runs-on: ubuntu-latest
@@ -49,7 +52,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          go run github.com/emrelab/go-flake-hunter/cmd/go-flake-hunter@latest hunt ./... \
+          go run github.com/emrelab/go-flake-hunter/cmd/go-flake-hunter@v0.3.0 hunt ./... \
             --format markdown --budget 200 --timeout 10m | tee go-flake-hunter-report.md
 
       - name: attach report
@@ -129,14 +132,25 @@ func replayGate(path string) string {
 	return fmt.Sprintf(`      - name: guard recorded flake
         run: |
           set +e
-          GOBIN="$RUNNER_TEMP/go-flake-hunter-bin" go install github.com/emrelab/go-flake-hunter/cmd/go-flake-hunter@latest || exit $?
-          "$RUNNER_TEMP/go-flake-hunter-bin/go-flake-hunter" replay %s -n 3
+          GOBIN="$RUNNER_TEMP/go-flake-hunter-bin" go install github.com/emrelab/go-flake-hunter/cmd/go-flake-hunter@v0.3.0 || {
+            status=$?
+            echo "Recorded flake status unknown (install failed)"
+            exit "$status"
+          }
+          report=$("$RUNNER_TEMP/go-flake-hunter-bin/go-flake-hunter" replay %s -n 3)
           status=$?
-          case "$status" in
-            0) echo "Recorded flake reproduced"; exit 1 ;;
-            3) echo "Recorded flake no longer reproduces strictly"; exit 0 ;;
-            *) exit "$status" ;;
-          esac
+          printf '%%s\n' "$report"
+          if [ "$status" = 0 ] || [ "$status" = 3 ]; then
+            observation=$(printf '%%s\n' "$report" | sed -n 's/^run *: \([0-9][0-9]*\/[0-9][0-9]*\) reproduced$/\1/p')
+            case "$observation" in
+              0/3) echo "Recorded flake did not reproduce"; exit 0 ;;
+              [123]/3) echo "Recorded flake reproduced"; exit 1 ;;
+            esac
+          fi
+          echo "Recorded flake status unknown"
+          [ "$status" = 0 ] && status=3
+          exit "$status"
+
 
 `, quoteArg(path))
 }
