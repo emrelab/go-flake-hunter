@@ -492,6 +492,12 @@ func hunt(ctx context.Context, args []string, out IO) error {
 	}
 
 	s := newScanner(out, o, "")
+	if baselinePath == "" {
+		path := capsule.DefaultBaselinePath(s.cwd)
+		if writeBaseline || !baselineMissing(path) {
+			baselinePath = path
+		}
+	}
 	// The baseline loads BEFORE the scan: if the file is corrupt, say it now,
 	// not after a 10-second scan.
 	if baselinePath != "" && !writeBaseline {
@@ -524,7 +530,7 @@ func hunt(ctx context.Context, args []string, out IO) error {
 		return runErr
 	}
 	if writeBaseline {
-		return writeBaselineFile(out, s, baselinePath)
+		return writeBaselineFile(ctx, out, s, baselinePath)
 	}
 	// One summary line: the answer to "why is the gate green" must appear in
 	// the report, or the user thinks the flake was not found.
@@ -543,10 +549,17 @@ func hunt(ctx context.Context, args []string, out IO) error {
 //
 // The gate is CLOSED for this run: a run that writes the baseline judging
 // itself by the very list it wrote is circular.
-func writeBaselineFile(out IO, s *scanner, path string) error {
-	if path == "" {
-		path = capsule.DefaultBaselinePath(s.cwd)
+func writeBaselineFile(ctx context.Context, out IO, s *scanner, path string) error {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return err
 	}
+	path = filepath.Join(canonical(filepath.Dir(path)), filepath.Base(path))
+	_, unlock, err := policy.Locked(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	ids := append([]string(nil), s.ids...)
 	if existing, err := capsule.LoadBaseline(path); err == nil {
 		ids = append(ids, existing.IDs...)

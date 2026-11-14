@@ -29,7 +29,7 @@ func TestBaselineWriteMigrationAndPreservation(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stderr bytes.Buffer
-			err := writeBaselineFile(IO{Stderr: &stderr}, &scanner{ids: []string{"fd_new"}}, path)
+			err := writeBaselineFile(t.Context(), IO{Stderr: &stderr}, &scanner{ids: []string{"fd_new"}}, path)
 			if tc.wantErr {
 				after, _ := os.ReadFile(path)
 				if !errors.Is(err, domain.ErrUsage) || string(after) != tc.body {

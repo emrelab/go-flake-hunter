@@ -154,3 +154,42 @@ func TestBaselineSurvivesUnrelatedCommit(t *testing.T) {
 		t.Fatalf("new defect did not trip gate: %d %s", code, stderr)
 	}
 }
+
+func TestAuditC12_DefaultBaselineAppliesToGate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	dir := clitest.FixtureDir(t, "repeat-accumulate")
+	t.Chdir(dir)
+	if code, _, stderr := clitest.Run("hunt", "--write-baseline"); code != 0 {
+		t.Fatalf("write exit=%d %s", code, stderr)
+	}
+	if code, _, stderr := clitest.Run("hunt", "--fail-on-flake"); code != 0 || !strings.Contains(stderr, "baseline: 1 known, 0 new") {
+		t.Fatalf("gate exit=%d %s", code, stderr)
+	}
+}
+
+func TestAuditC14_ConcurrentBaselineUpdatesMerge(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	base := filepath.Join(t.TempDir(), "baseline.json")
+	dirs := []string{clitest.FixtureDir(t, "repeat-accumulate"), clitest.FixtureDir(t, "repeat-accumulate")}
+	if err := os.WriteFile(filepath.Join(dirs[1], "go.mod"), []byte("module fixture/other\n\ngo 1.24\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range dirs {
+		t.Run(filepath.Base(filepath.Dir(dir))+filepath.Base(dir), func(t *testing.T) {
+			t.Parallel()
+			if code, _, stderr := clitest.Run("hunt", dir, "--write-baseline", "--baseline", base); code != 0 {
+				t.Errorf("write exit=%d %s", code, stderr)
+			}
+		})
+	}
+	t.Cleanup(func() {
+		b, err := capsule.LoadBaseline(base)
+		if err != nil || len(b.IDs) != 2 {
+			t.Errorf("baseline ids=%v err=%v", b.IDs, err)
+		}
+	})
+}
