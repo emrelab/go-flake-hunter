@@ -351,7 +351,7 @@ func (p Order) minimizeSelection(ctx context.Context, tgt Target, r gotest.Runne
 	}
 	min, err := search.Minimize(ctx, candidates, pred, verify)
 	var uncertain *search.VerificationError
-	if err != nil && !(errors.As(err, &uncertain) && uncertain.Observation.Failures > 0) {
+	if err != nil && (!errors.As(err, &uncertain) || uncertain.Observation.Failures <= 0) {
 		return nil, err
 	}
 	w := &domain.Witness{Kind: domain.KindOrder, Victim: tgt.Test, Polluters: min, Flags: domain.Flags{Parallel: 1}, Runs: verify, CrossClause: true, Seed: seed}

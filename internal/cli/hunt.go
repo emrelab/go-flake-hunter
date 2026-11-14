@@ -179,7 +179,9 @@ func (s *scanner) flush() error {
 		if err != nil {
 			return fmt.Errorf("sarif file: %w", err)
 		}
-		defer f.Close()
+		// A close failure after a successful write is not actionable: the
+		// SARIF document already reached the file. Say so instead of hiding it.
+		defer func() { _ = f.Close() }()
 		return report.SARIF(f, s.collected, Version)
 	}
 	return nil
@@ -260,7 +262,7 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 	}
 
 	if len(pkgFacts.ExternalDependencies) > 0 {
-		fmt.Fprintf(s.out.Stderr, "%s: external dependencies (static, package-wide): %s; clock/network/database control is outside go-flake-hunter; reproduction probes still run\n", pkgArg, strings.Join(pkgFacts.ExternalDependencies, "; "))
+		_, _ = fmt.Fprintf(s.out.Stderr, "%s: external dependencies (static, package-wide): %s; clock/network/database control is outside go-flake-hunter; reproduction probes still run\n", pkgArg, strings.Join(pkgFacts.ExternalDependencies, "; "))
 	}
 	for _, t := range tests {
 		res, err := s.registry.Run(ctx, probe.Target{Test: t, Dir: dir, Facts: pkgFacts}, s.runner)

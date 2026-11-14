@@ -150,7 +150,7 @@ func (p OrderCross) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*do
 	// is exactly what this class must prove.
 	min, err := search.Minimize(ctx, cands, pred, verify)
 	var uncertain *search.VerificationError
-	if err != nil && !(errors.As(err, &uncertain) && uncertain.Observation.Failures > 0) {
+	if err != nil && (!errors.As(err, &uncertain) || uncertain.Observation.Failures <= 0) {
 		return nil, err
 	}
 	if len(min) == 0 {

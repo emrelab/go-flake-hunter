@@ -83,7 +83,8 @@ func initCmd(ctx context.Context, args []string, out IO) error {
 			return domain.Wrap(domain.ErrUsage, "--replay-capsule must be a repo-relative JSON path")
 		}
 		for _, r := range replayCapsule {
-			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("./_-", r)) {
+			allowed := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("./_-", r)
+			if !allowed {
 				return domain.Wrap(domain.ErrUsage, "--replay-capsule path may contain only letters, digits, dot, slash, underscore and hyphen")
 			}
 		}
