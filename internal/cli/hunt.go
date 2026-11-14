@@ -236,6 +236,9 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 	// witness installed in between would enter the list as a user-owned test.
 	lockCtx, unlock, lerr := policy.Locked(ctx, dir)
 	if lerr != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return domain.Wrap(domain.ErrInternal, "could not acquire lock: %v", lerr)
 	}
 	if removed, err := cleanupWitnesses(dir); err == nil && len(removed) > 0 && s.o.verbose {

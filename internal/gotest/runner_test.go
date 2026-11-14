@@ -226,3 +226,19 @@ func TestShortSeen(t *testing.T) {
 		t.Errorf("Short=false: the sensor passed without -short — it tests nothing")
 	}
 }
+
+func TestAuditC7_DiscoveryAndPatternsPreserveCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	dir := t.TempDir()
+	e := &Exec{}
+	if _, err := e.Discover(ctx, dir); domain.ExitCode(err) != domain.ExitCanceled {
+		t.Errorf("discover exit=%d err=%v", domain.ExitCode(err), err)
+	}
+	if _, err := e.importPath(ctx, dir); domain.ExitCode(err) != domain.ExitCanceled {
+		t.Errorf("import path exit=%d err=%v", domain.ExitCode(err), err)
+	}
+	if _, err := ExpandPatterns(ctx, []string{"./..."}); domain.ExitCode(err) != domain.ExitCanceled {
+		t.Errorf("expand patterns exit=%d err=%v", domain.ExitCode(err), err)
+	}
+}

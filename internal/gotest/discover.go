@@ -19,6 +19,9 @@ import (
 func (e *Exec) Discover(ctx context.Context, pkgDir string) ([]domain.TestID, error) {
 	ctx, release, lerr := policy.Locked(ctx, pkgDir)
 	if lerr != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, domain.Wrap(domain.ErrInternal, "could not acquire lock: %v", lerr)
 	}
 	defer release()
@@ -31,8 +34,18 @@ func (e *Exec) Discover(ctx context.Context, pkgDir string) ([]domain.TestID, er
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = strings.TrimSpace(stdout.String())
+		}
+		if detail == "" {
+			detail = err.Error()
+		}
 		return nil, domain.Wrap(domain.ErrBuildFailed, "%s could not be listed: %s",
-			pkgDir, firstLines(stderr.String(), 3))
+			pkgDir, firstLines(detail, 3))
 	}
 
 	importPath, err := e.importPath(ctx, pkgDir)
@@ -60,6 +73,9 @@ func (e *Exec) importPath(ctx context.Context, pkgDir string) (string, error) {
 	cmd := exec.CommandContext(ctx, e.goBin(), "list", "-f", "{{.ImportPath}}", ".")
 	cmd.Dir = pkgDir
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
 	if err != nil {
 		return "", domain.Wrap(domain.ErrBuildFailed, "%s import path could not be resolved", pkgDir)
 	}

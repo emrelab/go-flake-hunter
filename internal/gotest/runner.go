@@ -59,6 +59,9 @@ func (e *Exec) Run(ctx context.Context, spec domain.RunSpec) (*domain.RunResult,
 	// inside the lock the probe holds does not deadlock.
 	ctx, release, err := policy.Locked(ctx, spec.Package)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, domain.Wrap(domain.ErrInternal, "could not acquire lock: %v", err)
 	}
 	defer release()

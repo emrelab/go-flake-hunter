@@ -45,11 +45,6 @@ type entry struct {
 	// sem serializes holders inside this process (a 1-slot channel, so a
 	// future timed variant can select on it).
 	sem chan struct{}
-	// file is non-nil while this process holds the OS lock.
-	file *os.File
-	// holders counts in-process holders; the OS lock is taken on 0->1 and
-	// released on 1->0.
-	holders int
 }
 
 func entryFor(key string) *entry {
@@ -89,54 +84,42 @@ func Locked(ctx context.Context, dir string) (context.Context, func(), error) {
 		return ctx, func() {}, ctx.Err()
 	}
 
-	mu.Lock()
-	e.holders++
-	first := e.holders == 1
-	mu.Unlock()
-
-	if first {
-		path := lockPath(key)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			e.sem <- struct{}{}
-			return ctx, func() {}, err
-		}
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
-		if err != nil {
-			e.sem <- struct{}{}
-			return ctx, func() {}, err
-		}
-		if err := flockExclusive(f); err != nil {
-			_ = f.Close()
-			e.sem <- struct{}{}
-			return ctx, func() {}, err
-		}
-		mu.Lock()
-		e.file = f
-		mu.Unlock()
+	f, err := acquireFileLock(ctx, key)
+	if err != nil {
+		e.sem <- struct{}{}
+		return ctx, func() {}, err
 	}
 
 	var once sync.Once
 	release := func() {
 		once.Do(func() {
-			mu.Lock()
-			e.holders--
-			last := e.holders <= 0
-			f := e.file
-			if last {
-				e.file = nil
-			}
-			mu.Unlock()
-
-			if last && f != nil {
-				_ = funlock(f)
-				_ = f.Close()
-			}
+			_ = funlock(f)
+			_ = f.Close()
 			e.sem <- struct{}{}
 		})
 	}
 
 	parent, _ := ctx.Value(lockTokenKey{}).(lockToken)
 	return context.WithValue(ctx, lockTokenKey{}, lockToken{key: key, parent: &parent}), release, nil
+}
+
+func acquireFileLock(ctx context.Context, key string) (*os.File, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path := lockPath(key)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := flockExclusive(ctx, f); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
 }
 
 // Held reports whether ctx already carries dir's lock.

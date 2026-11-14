@@ -29,6 +29,9 @@ func ExpandPatterns(ctx context.Context, args []string) ([]string, error) {
 	seen := map[string]bool{}
 
 	for _, arg := range args {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		dirs, err := expandOne(ctx, arg)
 		if err != nil {
 			return nil, err
@@ -71,6 +74,9 @@ func expandOne(ctx context.Context, arg string) ([]string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, domain.Wrap(domain.ErrUsage, "%s could not be resolved: %s",
 			arg, strings.TrimSpace(stderr.String()))
 	}
