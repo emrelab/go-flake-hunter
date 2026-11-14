@@ -34,5 +34,6 @@ Dual definitions are the number one cause of silent drift.
    `exec.Command("go", ...)` anywhere else is a bug.
 3. **A breaking capsule schema bumps `SchemaVersion`**; old capsules stay readable.
 4. **Exit codes are immutable.** CI scripts bind to them; codes may be added,
-   never reshuffled.
+   never reshuffled. Exit 7 covers package failure and incomplete execution.
+   See the [exit code table](ARCHITECTURE.md#101-typed-errors--exit-codes).
 5. **Generated test files are never edited by hand** (they carry a "DO NOT EDIT" header).

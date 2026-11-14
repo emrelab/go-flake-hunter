@@ -6,6 +6,23 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- Validate capsule IDs and generated calls. Repro, compile and replay resolve
+  recorded package names against the checkout. Witness creation is exclusive,
+  and cleanup checks ownership before removing a file.
+
+### Outcome and CI changes
+- Exit 7 indicates package failure or incomplete execution. A test that fails
+  in isolation is reported as broken and fails `--fail-on-flake` without a capsule.
+- JSON run reports add `packages`. Partial results are inconclusive across
+  report formats, with a SARIF note for the investigated target.
+- Reproduction commands run replay with the actual capsule. Capsules record
+  short mode, build tags and the target Go toolchain.
+- Load the default baseline automatically and merge updates under a lock.
+  Generated capsules and temporary witnesses are excluded from dirty provenance.
+- Scaffold gates fail on partial reproduction. CI uploads visible capsules,
+  and release builds test the tagged SHA before producing attestations and SBOMs.
+
 ### Fixed
 - The release page is the annotated tag message again. `release.yml` published
   with `gh release create --generate-notes`, which lists merged PR titles and

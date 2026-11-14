@@ -8,8 +8,9 @@ title: "jamf-cli — order-dependent test (issue #370)"
 Repo: [`Jamf-Concepts/jamf-cli`](https://github.com/Jamf-Concepts/jamf-cli) at
 `977b704`, 2026-11-11. Issue
 [#370](https://github.com/Jamf-Concepts/jamf-cli/issues/370), open since
-2026-09-07. Fix proposed in
-[#474](https://github.com/Jamf-Concepts/jamf-cli/pull/474).
+2026-09-07. The fix merged on November 12, 2026 in
+[#474](https://github.com/Jamf-Concepts/jamf-cli/pull/474)
+(`62feabf4168c816114218b94f932e9aecac249aa`).
 
 **Attribution.** The maintainer (`ktn-jamf`) wrote the issue and named the
 mechanism: the package keeps cobra's parsed state in package-level vars, so any
@@ -23,7 +24,7 @@ admitted order dependence that had been open for two months. The package has
 1736 tests and a full run costs 60-200 s, which is why nobody had shrunk it by
 hand.
 
-## Reproduction on current main
+## Reproduction at the base commit
 
 ```sh
 go test ./internal/commands/ -count=1               # ok, 61s

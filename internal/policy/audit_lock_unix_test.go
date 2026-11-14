@@ -59,8 +59,7 @@ func TestAuditC7_LockWaitCanCancelAndRetry(t *testing.T) {
 	case <-time.After(900 * time.Millisecond):
 		_ = funlock(f)
 		released = true
-		<-done
-		t.Fatal("OS lock wait did not cancel within one second")
+		t.Fatalf("OS lock wait did not cancel within one second: %v", <-done)
 	}
 	if err := funlock(f); err != nil {
 		t.Fatal(err)

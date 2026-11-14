@@ -5,7 +5,7 @@ title: Architecture
 
 # go-flake-hunter — Architecture
 
-**Version:** 1.1 · **Date:** November 1, 2026 · **Last synced:** November 4, 2026
+**Version:** 1.1 · **Date:** November 1, 2026 · **Last synced:** November 14, 2026
 **Status:** Implemented; `v0.3.0` is the current release (prebuilt binaries for
 linux/darwin/windows, `SHA256SUMS`). The tag list starts at `v0.1.0`.
 
@@ -37,7 +37,7 @@ This decision is the single thing that kept the MVP inside one developer’s rea
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  cmd/go-flake-hunter         main() → cli.Run() → os.Exit(code)  │
+│  cmd/go-flake-hunter         main() → cli.Execute() → os.Exit(code)  │
 └───────────────────────────┬─────────────────────────────────┘
                             │
 ┌───────────────────────────▼─────────────────────────────────┐
@@ -67,7 +67,7 @@ This decision is the single thing that kept the MVP inside one developer’s rea
 └─────────────────────────────────────────────────────────────┘
 
   Cross-cutting: internal/domain (types) · internal/policy (budget, redaction)
-                 internal/report (text|json|markdown)
+                 internal/report (text|json|markdown|sarif)
 ```
 
 **Dependency direction is one-way:** `domain` imports nothing. `gotest`, `facts`, `harness`, `evidence` use only `domain` + stdlib. `probe` uses those. `cli` is on top. No reverse dependencies — nothing looks at `domain` except from its own `domain_test` package.
@@ -78,69 +78,24 @@ This decision is the single thing that kept the MVP inside one developer’s rea
 
 ```
 go-flake-hunter/
-├── go.mod                          module github.com/emrelab/go-flake-hunter
-├── LICENSE                         Apache-2.0
-├── README.md
-├── cmd/go-flake-hunter/main.go          ~15 lines: no flags, only cli.Run
+├── cmd/go-flake-hunter/     CLI entry point and signal handling
 ├── internal/
-│   ├── domain/                     ★ single source of truth: types, constants, errors
-│   │   ├── test.go                 TestID, Status, Outcome
-│   │   ├── run.go                  RunSpec, RunResult, Flags
-│   │   ├── witness.go              Kind, Witness, Step
-│   │   ├── capsule.go              Capsule + schema version
-│   │   ├── names.go                generated file/function names (one place)
-│   │   └── errors.go               typed errors + exit codes
-│   ├── gotest/
-│   │   ├── runner.go               real implementation of the Runner interface (exec)
-│   │   ├── discover.go             go test -list
-│   │   ├── json.go                 test2json events → RunResult
-│   │   └── normalize.go            output → stable signature (strip time/tmp/addr)
-│   ├── facts/
-│   │   ├── scan.go                 go/ast + go/parser walk
-│   │   └── facts.go                PkgFacts (static fact sheet)
-│   ├── harness/
-│   │   ├── template.go             text template
-│   │   ├── render.go               render + go/format validation
-│   │   └── install.go              write / delete / stale cleanup / signal capture
-│   ├── search/
-│   │   ├── ddmin.go                classic ddmin
-│   │   └── minimize.go             ddmin + re-verify N times
-│   ├── probe/
-│   │   ├── probe.go                Probe interface, Target
-│   │   ├── repeat.go               -count=N (cheapest)
-│   │   ├── order.go                order dependency
-│   │   ├── parallel.go             t.Parallel / shared resource
-│   │   ├── env.go                  os.Getenv effect
-│   │   └── registry.go             list by cost order
-│   ├── evidence/
-│   │   ├── env.go                  environment diff
-│   │   ├── fs.go                   file/port observation
-│   │   ├── static.go               AST: package var read/write
-│   │   └── race.go                 -race output summary
-│   ├── capsule/
-│   │   ├── id.go                   content-addressed identity
-│   │   └── store.go                .go-flake-hunter/ directory
-│   ├── compile/
-│   │   ├── persistent.go           build-tagged permanent test generation
-│   │   └── golden.go               golden file comparison (test helper)
-│   ├── policy/
-│   │   ├── budget.go               run/time budget
-│   │   └── redact.go               env value masking
-│   └── report/
-│       ├── text.go
-│       ├── json.go
-│       └── markdown.go             PR comment output
-├── testdata/
-│   ├── fixtures/                   mini modules with their own go.mod
-│   │   ├── order-basic/            shared global
-│   │   ├── parallel-race/          t.Parallel + shared counter
-│   │   ├── env-dependent/          os.Getenv
-│   │   ├── file-leak/              temp file
-│   │   ├── repeat-accumulate/      state accumulated across -count
-│   │   ├── clause-mismatch/        package foo vs foo_test
-│   │   └── parallel-clause/        t.Parallel across foo / foo_test
-│   └── golden/                     expected generated test files
-└── .github/workflows/ci.yml        linux+macos, -race, fixtures
+│   ├── capsule/            capsule IDs, store and baseline files
+│   ├── cli/                commands, checkout resolution and reporting
+│   ├── clitest/            integration test helpers
+│   ├── compile/            persistent regression generation
+│   ├── domain/             types, names, schema and exit codes
+│   ├── evidence/           static evidence from package facts
+│   ├── facts/              AST scans of active Go files
+│   ├── gotest/             discovery, package metadata, runner and event parsing
+│   ├── harness/            temporary witness rendering, install and cleanup
+│   ├── policy/             budgets, directory locks and redaction
+│   ├── probe/              repeat, order, parallel and environment hypotheses
+│   ├── report/             text, JSON, Markdown and SARIF
+│   └── search/             minimization and verification
+├── testdata/               fixture modules and golden files
+├── scripts/                local validation and maintenance
+└── .github/workflows/      CI, nightly, release and Pages
 ```
 
 `testdata/` is skipped by the go tool — the fixtures don't pollute `./...`, each one is its own module.
@@ -300,7 +255,9 @@ type Runner interface {
 
 ### 5.1. Discover
 
-`go test -list '.*'` gives source order (verified). Subtests do not appear here — outside MVP scope; they are detected via `PkgFacts.Subtests` and `ErrUnsupportedTest` is returned.
+`go test -list '.*'` gives top-level tests in source order. The harness
+calls the top-level test and observes its subtest tree. `go list -json` selects
+the package files for the static scan, including active build tags.
 
 ```go
 func (r *Exec) Discover(ctx context.Context, pkg string) ([]domain.TestID, error) {
@@ -350,11 +307,12 @@ func (r *Exec) Run(ctx context.Context, spec domain.RunSpec) (*domain.RunResult,
 }
 ```
 
-**Critical distinctions:**
-- `*exec.ExitError` → don't return an error, write to `RunResult.ExitCode`. A failing test is the normal flow.
-- Build failure (`[build failed]` + build output) → `BuildFailed=true`; this is **not** a flake, it's a user error. No budget is spent; the probe chain stops immediately.
-- `context.DeadlineExceeded` → `TimedOut=true`; a timeout may be the *cause* of the flake — not a separate hypothesis, an evidence field.
-- `cmd.Dir = spec.Package` + pattern `.` was chosen: `go.work`, `GOFLAGS`, vendor all resolve correctly on their own. The price: paths in the output are relative to the package directory and must be converted to absolute paths.
+The runner matches the process exit status to the package terminal event
+and records terminal events for each test and repeat round. A complete test
+failure is data for the probe. A package that reports failure with no failed
+test ends the run with `ErrPackageFailed`. Missing or inconsistent terminal
+events produce `ErrIncomplete`. Both return exit 7. Compilation failures
+return exit 6. Each run consumes budget and inherits the target Go environment.
 
 ### 5.3. Order reconstruction
 
@@ -439,24 +397,14 @@ Also checked: is there a `TestMain` (if so, it runs too since the harness is in 
 
 ### 6.3. File name and lifecycle
 
-```go
-func (h *Harness) Install(pkg string, steps []domain.Step, fn string) (string, error) {
-	src := render(witnessTmpl, map[string]any{"Package": pkg, "Func": fn, "Steps": steps})
-	formatted, err := format.Source([]byte(src))
-	if err != nil {
-		// If the code we generate doesn't compile, that's our bug, not the user's.
-		return "", fmt.Errorf("%w: generated witness syntax is invalid: %v", err)
-	}
-	h.path = filepath.Join(h.dir, domain.WitnessFilePrefix+h.suffix+"_test.go")
-	return h.path, os.WriteFile(h.path, formatted, 0o644)
-}
-```
-
-- `format.Source` runs **before** writing: a broken harness never reaches disk.
-- `zz_` prefix: files prefixed with `_`/`.` are skipped by the go tool (verified).
-- `Remove()` via `defer` on every run; `errors.Is(err, fs.ErrNotExist)` is swallowed.
-- **Signal safety:** `signal.NotifyContext(SIGINT, SIGTERM)` + `defer h.Remove()`; additionally, at startup `cleanupStale(dir)` deletes old `zz_goflakehunter_witness_*` files (leftovers after a crash/kill).
-- The user's worktree is never permanently polluted: the permanent artifact is written **only** by the `compile` command, on the user's explicit request.
+- The harness formats source before creating a `zz_goflakehunter_witness_*_test.go`
+  file. Exclusive creation rejects an existing file or symlink.
+- The caller holds the package lock across installation, execution and
+  deferred removal. Removal checks file identity and the checksum header.
+- Startup cleanup uses the same lock. It removes checksum-verified files
+  and complete legacy files with the exact old template header and a single
+  witness declaration. Other files stay in place.
+- `compile` writes the persistent, build-tagged artifact on request.
 
 ---
 
@@ -860,8 +808,9 @@ No panic when the budget is exceeded: a `status: partial` capsule is written and
 | `ErrUsage` | `2` | "usage: go-flake-hunter repro <package-dir> [TestName]" |
 | `ErrNotReproduced` | `3` | `repro`: requested test could not be reproduced within the budget; `replay`: witness did not fail N/N; `compile --verify`: generated test stayed green |
 | `ErrBudgetExceeded` | `4` | "budget exceeded" + note: "raise the budget: --budget N --timeout 10m" (partial capsule written) |
-| `ErrUnsupportedTest` | `5` | "unsupported test form: <reason>" (TestMain/subtest/different test package) |
+| `ErrUnsupportedTest` | `5` | "unsupported test form: <reason>" (unsupported witness or package combination) |
 | `ErrBuildFailed` | `6` | "package failed to build: <reason>" — also `replay` when the package does not compile (a build error is never reported as "the flake is fixed") |
+| `ErrPackageFailed` or `ErrIncomplete` | `7` | package failed after its tests or the selected run did not complete |
 | internal error | `10` | "internal error: <id> (use --debug for detail)" |
 | `context.Canceled` / SIGINT | `130` | "cancelled (SIGINT); unfinished witness files deleted" (128+SIGINT) |
 
@@ -1009,7 +958,7 @@ The Red Team analysis (K1) makes this the MVP's survival condition:
   database and random calls before probes but never infer a root cause or skip
   search. Only call identities are stored. A synctest virtual clock does not
   isolate external I/O; no bubbles are synthesized around another test.
-- ❌ **Subtest (`t.Run` inner) support** — outside the MVP; explicitly refused with `ErrUnsupportedTest`.
+- Subtest trees run through their enclosing top-level test.
 - ❌ **Cross-package order *within one process*** — none. `--polluter-pkg` runs two `go test`
   processes in a chosen sequence and merges the verdicts, so only state that survives the
   process boundary (files, ports, cwd) is expressible there; an in-memory global that the

@@ -9,7 +9,7 @@
 
 > Reproduce the flake in 30 seconds instead of 30 minutes — and leave a permanent regression test in the repo.
 
-224 tests + 2 fuzz targets · CI on linux/macos/windows + a nightly sweep · zero dependencies ·
+239 tests + 2 fuzz targets · CI on linux/macos/windows + a nightly sweep · zero dependencies ·
 three real upstream flake cases reduced to witnesses ([evidence](docs/real-world/README.md))
 
 Finds flaky Go-test failures caused by **order, parallelism, repetition and
@@ -64,6 +64,12 @@ chmod +x go-flake-hunter-0.3.0-linux-amd64 && mv go-flake-hunter-0.3.0-linux-amd
 go install github.com/emrelab/go-flake-hunter/cmd/go-flake-hunter@v0.3.0
 ```
 
+On Windows, save the Windows amd64 executable in a directory on
+your `PATH`, then run `go-flake-hunter.exe version` in PowerShell. You can also
+run the `go install` command above and add the output directory from
+`go env GOBIN` to `PATH`. An empty `GOBIN` defaults to the `bin` directory
+under `go env GOPATH`.
+
 The GitHub Action prefers the prebuilt binary of the tag it is pinned to and
 falls back to building its own source, so `@v0.3.0` needs no toolchain setup
 beyond `actions/setup-go`.
@@ -81,8 +87,8 @@ go-flake-hunter hunt ./...
 go-flake-hunter compile
 go test -tags goflakehunter -run '^TestFlakeRegression_' .
 
-# 3) send the capsule to your team (runs no tests, needs no `go`)
-go-flake-hunter explain .go-flake-hunter/gfh_*.json --format markdown
+# 3) explain one capsule (replace the example with the path from your scan)
+go-flake-hunter explain .go-flake-hunter/gfh_e3c71933f905.json --format markdown
 ```
 
 Real output (`testdata/fixtures/order-basic`):
@@ -98,7 +104,7 @@ flake found: TestVictim
   evidence     : TestPolluter writes, TestVictim reads: seeded
 
   reproduce:
-    go test . -run '^TestFlakeWitness$' -count=1 -parallel=1
+    go-flake-hunter replay '.go-flake-hunter/gfh_e3c71933f905.json' --pkg '.' -n 1
 
   capsule      : gfh_e3c71933f905
   status       : confirmed
@@ -129,7 +135,7 @@ Three targeted upstream cases completed the full lifecycle:
 |---|---|---|
 | `gosimple/slug` @ `1eab316` | `TestSlugMakeUserSubstituteLang` → `TestSlugMake` | order; fix merged upstream in [#83](https://github.com/gosimple/slug/pull/83) (2024), re-validated here |
 | `router-for-me/CLIProxyAPI` @ `0074897` | `TestResponsesWebsocketHomeSelectedAuthCallbackPinsAndReusesFirstSelection` → `TestCodexClientModelsApplyPatchRouting` | order; proposed fix in [#7356](https://github.com/router-for-me/CLIProxyAPI/pull/7356) (open), applied locally and validated |
-| `Jamf-Concepts/jamf-cli` @ `977b704` | `TestResolveAuth_URLNormalization` → `TestCheckAPIMatchRefusesAPlatformCommandOnAnInstanceProfile` | order; witness + fix proposed in [#474](https://github.com/Jamf-Concepts/jamf-cli/pull/474) (open), 1873 preceding tests shrunk to one polluter |
+| `Jamf-Concepts/jamf-cli` @ `977b704` | `TestResolveAuth_URLNormalization` → `TestCheckAPIMatchRefusesAPlatformCommandOnAnInstanceProfile` | order; witness + fix merged in [#474](https://github.com/Jamf-Concepts/jamf-cli/pull/474), 1873 preceding tests shrunk to one polluter |
 
 The first two (November 10) confirm the lifecycle end to end: confirmed capsule
 → replay 5/5 → generated regression RED → the fix → the same regression GREEN.
@@ -203,6 +209,9 @@ takes `--changed` ·
 any format — one hunt feeds both the job summary and code scanning). `compile`
 also takes `--pkg DIR`, `--print`, `--dry-run` and `--verify`.
 
+When present, `.go-flake-hunter/baseline.json` is loaded from the working
+directory. `--baseline FILE` selects a different file.
+
 Baselines use commit-independent defect fingerprints (`go-flake-hunter/baseline/v2`),
 so an unrelated commit does not turn a known flake into a new finding. The
 fingerprint covers module, victim package/name, class, polluter identities,
@@ -241,13 +250,15 @@ note — evidence is never invented.
 
 ```json
 { "schema": "go-flake-hunter/v2", "flakes": [ { "id": "gfh_…", "kind": "order", … } ],
-  "runs": 42, "maxRuns": 1000 }
+  "runs": 42, "maxRuns": 1000, "packages": [] }
 ```
 
+Package-level failures, incomplete runs, and broken tests appear in `packages`.
+Partial capsules carry `"conclusion": "inconclusive"` in reports.
+
 `go-flake-hunter init --replay-capsule .go-flake-hunter/gfh_ID.json` adds a regression
-gate for a committed capsule: replayed failure turns CI red, a strictly
-non-reproducing witness turns it green, and build/cancellation errors remain
-errors. Cross-binary capsules replay both stages; no generated test is needed.
+gate for a committed capsule: replayed failure turns CI red, a complete
+0/3 replay turns it green, and an incomplete replay reports an unknown result. Cross-binary capsules replay both stages; no generated test is needed.
 
 `hunt --jobs N` scans up to N package directories concurrently (default
 `min(NumCPU, 4)`). All workers share one run/time budget and reports merge in
@@ -274,14 +285,15 @@ CI scripts bind to these; no path fails silently with 0.
 | Code | Meaning |
 |---|---|
 | `0` | completed `hunt` (including advisory suspected findings), or confirmed reproduction (gate off) |
-| `1` | new confirmed flake found (`--fail-on-flake`) |
+| `1` | new confirmed flake or test that fails in isolation (`--fail-on-flake`) |
 | `2` | usage error |
 | `3` | `repro`: the requested test did not reproduce within budget; `compile --verify`: the artifact stayed green **or was skipped for a missing env var** |
 | `4` | budget exceeded (partial capsule written) |
 | `5` | unsupported witness form or compile of a non-confirmed/cross-clause/cross-binary capsule |
 | `6` | package does not build |
+| `7` | package failed independently of its tests or the run did not complete |
 | `10` | internal error (detail with `--debug`) |
-| `130` | cancelled (SIGINT); half-written witness files deleted |
+| `130` | cancelled (SIGINT) |
 
 ## What it can and cannot find
 

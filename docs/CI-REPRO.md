@@ -111,7 +111,7 @@ jobs:
 Verified locally on this repo (the command, its output shape and every exit code
 below). The real output, indented because it contains a fence of its own:
 
-    $ go-flake-hunter repro --from-json failure.json --format markdown --budget 400 --timeout 120s
+    $ go-flake-hunter repro --from-json failure.json --capsule-dir "$RUNNER_TEMP/capsules" --format markdown --budget 400 --timeout 120s
     ### flake: TestVictim
     
     | field | value |
@@ -127,12 +127,12 @@ below). The real output, indented because it contains a fence of its own:
     Reproduce:
     
     ```sh
-    go test . -run '^TestFlakeWitness$' -count=1 -parallel=1
+    go-flake-hunter replay "$RUNNER_TEMP/capsules/gfh_ad2495a77e2c.json" --pkg '.' -n 1
     ```
     
     Permanent regression test: `checkout_TestVictim_goflakehunter_test.go` (build tag `goflakehunter`).
     
-- `--format markdown` is the comment body, byte for byte — no templating needed.
+- `--format markdown` is the job summary body, byte for byte — no templating needed.
 - `--from-json` resolves import paths with `go list`, so it must run inside the
   repository the log came from.
 - Exit codes: `0` witness found, `3` not reproduced, `4` budget exhausted

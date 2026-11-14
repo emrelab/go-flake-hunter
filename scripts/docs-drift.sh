@@ -60,7 +60,9 @@ fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-( cd testdata/fixtures/order-basic && "$root/go-flake-hunter" hunt ./... ) \
+cp -R testdata/fixtures/order-basic "$tmp/order-basic"
+fixture="$tmp/order-basic"
+( cd "$fixture" && "$root/go-flake-hunter" hunt ./... ) \
   > "$tmp/actual.raw" 2>&1
 # Only the confirmed block; the run also reports the tests it cleared.
 sed -n '/^flake found: TestVictim/,/status .*: confirmed/p' "$tmp/actual.raw" \
@@ -77,12 +79,12 @@ if [ ! -s "$tmp/actual" ] || [ ! -s "$tmp/doc" ]; then
   err "could not extract the sample output (doc block or fixture run empty)"
 else
   norm() {
-    sed -E \
+    sed "s|$fixture/||g; s|--pkg '$fixture'|--pkg '.'|g" "$1" | sed -E \
       -e 's/gfh_[0-9a-f]{12}/gfh_ID/g' \
       -e 's/^[[:space:]]+//' -e 's/[[:space:]]+: /: /' \
       -e 's/^run: .*/run: N\/N/' \
       -e 's/^Wilson 95%: .*/Wilson 95%: X/' \
-      -e '/^$/d' "$1"
+      -e '/^$/d'
   }
   if ! diff -u <(norm "$tmp/doc") <(norm "$tmp/actual") > "$tmp/diff"; then
     err "the README sample output differs from the binary's"
@@ -135,6 +137,25 @@ else
     err "README must say '${ntest} tests + ${nfuzz} fuzz targets' (from go test -list)"
   fi
 fi
+
+# Architecture, documented exit codes and release support must match the tree.
+for pkg in internal/*/; do
+  grep -Fq "${pkg#internal/}" docs/ARCHITECTURE.md || err "architecture is missing $pkg"
+done
+for code in $(awk '/^[[:space:]]*Exit[A-Za-z]+[[:space:]]*=/ {print $3}' internal/domain/errors.go); do
+  cell=$(printf '| `%s` |' "$code")
+  grep -Fq "$cell" README.md || err "README is missing exit $code"
+  grep -Fq "$cell" docs/ARCHITECTURE.md || err "architecture is missing exit $code"
+done
+series=$(git tag --list 'v[0-9]*' --sort=-version:refname | sed -n '1s/^v\([0-9]*\.[0-9]*\)\..*/\1.x/p')
+if [ -z "$series" ] || ! grep -Eq "^\| $series[[:space:]]+\| ✅" SECURITY.md; then
+  err "SECURITY.md must list the current release series as supported"
+fi
+if grep -E 'go-flake-hunter explain .*\*\.json' README.md; then
+  err "explain requires one capsule"
+fi
+grep -Eq 'pull/474\).*merged' docs/real-world/README.md || err "Jamf #474 merged status is missing"
+scripts/release-check.sh || err "release workflow is missing a required gate"
 
 if [ "$fail" -ne 0 ]; then
   echo "docs-drift: FAILED — update the docs or the fixture, not this script" >&2

@@ -13,7 +13,7 @@ when searched. No test body was modified to make discovery succeed.
 |---|---|---|---|---|---|---|
 | [slug](slug/summary.json) | `1eab3167af84fc96dbabe7b5d9c22d6d4c214800` | [gosimple/slug#83](https://github.com/gosimple/slug/pull/83), `76470d7e1c9c8bb5cf9b9df392b9fb5f35b77e9a` | 5/5 failed | verified RED | PASS | 0/2, exit 3 |
 | [cliproxy](cliproxy/summary.json) | `0074897481fee1dcd595c1caa1d57e6a379b6be6` | [CLIProxyAPI#7356](https://github.com/router-for-me/CLIProxyAPI/pull/7356), `e056459bd00de0c63bbf5e09879704b0d53fd142` | 5/5 failed | verified RED | PASS | 0/2, exit 3 |
-| [jamf-cli](jamf-cli/README.md) | `977b704` | [Jamf-Concepts/jamf-cli#474](https://github.com/Jamf-Concepts/jamf-cli/pull/474) (open) | 3/3 failed, deterministic | verified RED | PASS | default suite + `-shuffle` 2/7/10/1234 green |
+| [jamf-cli](jamf-cli/README.md) | `977b704` | [Jamf-Concepts/jamf-cli#474](https://github.com/Jamf-Concepts/jamf-cli/pull/474) (merged November 12, 2026) | 3/3 failed, deterministic | verified RED | PASS | default suite + `-shuffle` 2/7/10/1234 green |
 
 These targeted historical cases demonstrate reproduction and permanence. They
 do not estimate recall or false-positive rate over arbitrary repositories.
