@@ -14,8 +14,32 @@ on:
 permissions:
   contents: read
 
+env:
+  GO_RELEASE_VERSION: '1.26.11'
+  GOTOOLCHAIN: local
+
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_RELEASE_VERSION }}
+          cache: false
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - run: make fixtures
+
   build:
+    needs: test
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     strategy:
       fail-fast: false
       # One entry per release target. Each is built natively: cross-compiling
@@ -46,9 +70,11 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
+          go-version: ${{ env.GO_RELEASE_VERSION }}
           # Zero dependencies, so there is no module cache worth restoring —
           # and v7's default cache looks for go.sum, which this module has not.
           cache: false
@@ -66,6 +92,7 @@ jobs:
           fi
 
       - name: build
+        id: binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -75,6 +102,7 @@ jobs:
           suffix=""
           [ "$GOOS" = windows ] && suffix=".exe"
           out="dist/go-flake-hunter-$VERSION-$GOOS-$GOARCH$suffix"
+          echo "path=$out" >> "$GITHUB_OUTPUT"
           CGO_ENABLED=0 go build -trimpath \
             -ldflags "-s -w -X main.version=$VERSION" \
             -o "$out" ./cmd/go-flake-hunter
@@ -87,10 +115,28 @@ jobs:
             echo "cross build: skipping the run check for $GOOS/$GOARCH"
           fi
 
+      - uses: anchore/sbom-action@v0.24.3
+        with:
+          file: ${{ steps.binary.outputs.path }}
+          output-file: ${{ steps.binary.outputs.path }}.spdx.json
+          format: spdx-json
+          upload-artifact: false
+          upload-release-assets: false
+      - uses: actions/attest@v4
+        if: github.event_name == 'push'
+        with:
+          subject-path: ${{ steps.binary.outputs.path }}
+      - uses: actions/attest@v4
+        if: github.event_name == 'push'
+        with:
+          subject-path: ${{ steps.binary.outputs.path }}
+          sbom-path: ${{ steps.binary.outputs.path }}.spdx.json
+
       - uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/go-flake-hunter-*
+          if-no-files-found: error
 
   publish:
     # Tag pushes only. A dispatched dry run has no tag to point a release at,

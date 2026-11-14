@@ -4,7 +4,8 @@
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | ✅        |
+| 0.3.x   | ✅        |
+| ≤ 0.2.x | ❌        |
 
 ## Reporting a vulnerability
 
@@ -29,3 +30,11 @@ Honest scope, so you can judge the risk yourself:
 - Capsules (`.go-flake-hunter/*.json`) record test names, file paths, ports and
   environment **key names — never values**. Treat a capsule like a build log:
   shareable, but check it before posting paths you consider sensitive.
+
+
+## Rollback
+
+Pin the Action or install command to the previous supported release while a
+fixed patch is prepared. Keep the affected tag and its assets intact for
+investigation. Verify the rollback binary with the release checksums and, when
+available, `gh attestation verify <binary> --repo emrelab/go-flake-hunter`.
