@@ -28,14 +28,21 @@ func (p scanProbe) Probe(ctx context.Context, t probe.Target, r gotest.Runner) (
 
 func packageDirs(t *testing.T) []string {
 	t.Helper()
-	root := t.TempDir()
-	dirs := []string{filepath.Join(root, "a"), filepath.Join(root, "b")}
-	for _, d := range dirs {
-		if err := os.Mkdir(d, 0700); err != nil {
+	return []string{testModule(t), testModule(t)}
+}
+
+func testModule(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, src := range map[string]string{
+		"go.mod": "module fixture/scanner\n\ngo 1.24\n",
+		"p.go":   "package p\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return dirs
+	return dir
 }
 func testScanner(p probe.Probe, r gotest.Runner) *scanner {
 	return &scanner{o: huntOptions{format: "json"}, out: IO{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}, registry: probe.NewRegistry(p), runner: r, budget: policy.New(100, time.Minute)}
@@ -100,7 +107,7 @@ func TestPackagesShareBudgetAndPreservePartial(t *testing.T) {
 	}
 }
 func TestSuspectedDoesNotEnterBaselineOrGate(t *testing.T) {
-	dir := t.TempDir()
+	dir := testModule(t)
 	o := domain.Observe(3, 2)
 	p := scanProbe{fn: func(_ context.Context, target probe.Target, _ gotest.Runner) (*domain.Witness, error) {
 		return &domain.Witness{Kind: domain.KindOrder, Victim: target.Test, Polluters: []domain.TestID{{Name: "TestPolluter"}}, Runs: 3, Verification: &o}, domain.ErrNotReproducible
@@ -152,7 +159,7 @@ func TestPackagesKeepInputOrderAndSerializeWhenJobsOne(t *testing.T) {
 }
 
 func TestDependencyHintArrivesBeforeProbeUnderScheduler(t *testing.T) {
-	dir := t.TempDir()
+	dir := testModule(t)
 	if err := os.WriteFile(filepath.Join(dir, "app.go"), []byte("package p\nimport \"time\"\nfunc clock(){time.Now()}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}

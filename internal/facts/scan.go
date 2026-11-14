@@ -2,36 +2,46 @@ package facts
 
 import (
 	"go/ast"
-	"go/build/constraint"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/emrelab/go-flake-hunter/internal/domain"
 )
 
-// Scan parses every _test.go file in dir and returns the package facts.
-//
-// Only syntax is needed: no type checking, no go/packages. Files that fail to
-// parse are skipped (a broken file is reported by `go build`, not by us).
-//
-// Files excluded by a build constraint are skipped. That is not pedantry: our
-// own regression test carries `//go:build goflakehunter` and full of t.Run calls,
-// so counting it would mark the package as "uses subtests" and make every later
-// hunt in that package skip itself — a silent, self-inflicted no-op.
-//
-// The package's non-test .go files are parsed too, but ONLY for env evidence
-// (AppEnvReads + their comparison literals): a test can flip on a variable the
-// application code reads. Every other fact stays a strict test-file signal so
-// the order probe's candidates do not gain noise from app code.
-func Scan(dir string) (PkgFacts, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return PkgFacts{}, err
+// Scan parses the target toolchain's active file set. Standalone source
+// scans use go/build file matching when no package metadata is provided.
+func Scan(dir string, active ...domain.PackageFiles) (PkgFacts, error) {
+	var files domain.PackageFiles
+	if len(active) > 0 {
+		files = active[0]
+	} else {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return PkgFacts{}, err
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".go") {
+				continue
+			}
+			if ok, err := build.Default.MatchFile(dir, name); err == nil && ok {
+				if strings.HasSuffix(name, "_test.go") {
+					files.TestGoFiles = append(files.TestGoFiles, name)
+				} else {
+					files.GoFiles = append(files.GoFiles, name)
+				}
+			}
+		}
+		files.ImportPath = importPath(dir)
 	}
+	testFiles := append(append([]string(nil), files.TestGoFiles...), files.XTestGoFiles...)
+	appFiles := append(append([]string(nil), files.GoFiles...), files.CgoFiles...)
 
 	f := PkgFacts{
 		Dir:            dir,
@@ -49,18 +59,10 @@ func Scan(dir string) (PkgFacts, error) {
 	fset := token.NewFileSet()
 	var parsed []*ast.File
 
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		// "_" and "." prefixes are ignored by the go tool; mirror that.
-		if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
-			continue
-		}
+	for _, name := range testFiles {
 		path := filepath.Join(dir, name)
 		src, err := os.ReadFile(path)
-		if err != nil || excludedByBuildTags(src) {
+		if err != nil {
 			continue
 		}
 		file, err := parser.ParseFile(fset, path, src, 0)
@@ -141,17 +143,10 @@ func Scan(dir string) (PkgFacts, error) {
 	for _, k := range f.EnvReads {
 		testKeys[k] = true
 	}
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
-			continue
-		}
+	for _, name := range appFiles {
 		path := filepath.Join(dir, name)
 		src, err := os.ReadFile(path)
-		if err != nil || excludedByBuildTags(src) {
+		if err != nil {
 			continue
 		}
 		file, err := parser.ParseFile(fset, path, src, 0)
@@ -182,66 +177,9 @@ func Scan(dir string) (PkgFacts, error) {
 	for k, vals := range f.EnvValues {
 		f.EnvValues[k] = dedupeSort(vals)
 	}
-	f.ExternalDependencies = externalDependencies(dir)
-	f.ImportPath = importPath(dir)
+	f.ExternalDependencies = externalDependencies(dir, append(testFiles, appFiles...))
+	f.ImportPath = files.ImportPath
 	return f, nil
-}
-
-// excludedByBuildTags reports whether the file would be left out of a build
-// that passes no tags — which is exactly what `go test` does by default.
-//
-// Only the header is inspected: build constraints are required to appear before
-// the package clause, so the walk stops at the first line that is neither a
-// comment nor a constraint.
-func excludedByBuildTags(src []byte) bool {
-	var exprs []constraint.Expr
-header:
-	for _, raw := range strings.Split(string(src), "\n") {
-		line := strings.TrimSpace(raw)
-		switch {
-		case line == "":
-		case constraint.IsGoBuild(line) || constraint.IsPlusBuild(line):
-			e, err := constraint.Parse(line)
-			if err != nil {
-				continue
-			}
-			exprs = append(exprs, e)
-		case strings.HasPrefix(line, "//"), strings.HasPrefix(line, "/*"):
-			// Other header comments (license, "Code generated", doc) are not a barrier.
-		default:
-			break header
-		}
-	}
-	if len(exprs) == 0 {
-		return false
-	}
-	tags := defaultBuildTags()
-	for _, e := range exprs {
-		if !e.Eval(func(tag string) bool { return tags[tag] }) {
-			return true
-		}
-	}
-	return false
-}
-
-// defaultBuildTags mirrors the tags the go tool sets when none are passed
-// explicitly. Only tags that can appear in a test file matter here; the go1.x
-// series is cumulative and included so version-gated files resolve correctly.
-func defaultBuildTags() map[string]bool {
-	tags := map[string]bool{"gc": true, runtime.GOOS: true, runtime.GOARCH: true}
-	ver := strings.TrimPrefix(runtime.Version(), "go")
-	parts := strings.Split(ver, ".")
-	if len(parts) >= 2 {
-		major, err1 := strconv.Atoi(parts[0])
-		minor, err2 := strconv.Atoi(parts[1])
-		if err1 == nil && err2 == nil {
-			for m := 0; m <= minor; m++ {
-				tags[strconv.Itoa(major)+"."+strconv.Itoa(m)] = true
-				tags["go"+strconv.Itoa(major)+"."+strconv.Itoa(m)] = true
-			}
-		}
-	}
-	return tags
 }
 
 // collectGlobals returns the names of package-level vars and consts in all

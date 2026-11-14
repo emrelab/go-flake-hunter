@@ -60,7 +60,7 @@ func compileCmd(ctx context.Context, args []string, out IO) error {
 			pkg = fs.Args()[0]
 		}
 	}
-	pkgDir, err := resolveTargetDir(ctx, c.Target.Package, pkg, ".")
+	pkgDir, err := resolveTargetDir(ctx, c.Target.Package, pkg, ".", c.Witness.Flags.Tags...)
 	if err != nil {
 		return err
 	}
@@ -82,7 +82,11 @@ func compileCmd(ctx context.Context, args []string, out IO) error {
 	c.Target.RelDir = pkgDir
 
 	// Clause determines which test package the generated test belongs to.
-	f, err := facts.Scan(pkgDir)
+	files, err := gotest.PackageFiles(ctx, pkgDir, c.Witness.Flags.Tags)
+	if err != nil {
+		return err
+	}
+	f, err := facts.Scan(pkgDir, files)
 	if err != nil {
 		return domain.Wrap(domain.ErrUsage, "could not read %s", pkgDir)
 	}
@@ -333,9 +337,9 @@ func pkgOrDefault(pkg, fallback string) string {
 }
 
 // resolveTargetDir uses only checkout roots and directories selected by the operator.
-func resolveTargetDir(ctx context.Context, importPath, explicit, checkout string) (string, error) {
+func resolveTargetDir(ctx context.Context, importPath, explicit, checkout string, tags ...string) (string, error) {
 	if explicit != "" {
-		dirs, err := gotest.ResolveImportDirs(ctx, []string{explicit})
+		dirs, err := gotest.ResolveImportDirs(ctx, []string{explicit}, tags...)
 		if err != nil {
 			return "", err
 		}
@@ -345,7 +349,7 @@ func resolveTargetDir(ctx context.Context, importPath, explicit, checkout string
 		}
 		return "", domain.Wrap(domain.ErrUsage, "--pkg %s does not match capsule package %s", explicit, importPath)
 	}
-	dirs, err := resolveCheckoutDirs(ctx, checkout)
+	dirs, err := resolveCheckoutDirs(ctx, checkout, tags...)
 	if err != nil {
 		return "", err
 	}

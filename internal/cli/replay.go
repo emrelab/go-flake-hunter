@@ -264,11 +264,15 @@ func replayRepeatCount(c domain.Capsule) int {
 }
 
 func replayTarget(ctx context.Context, pkgArg string, c domain.Capsule) (string, facts.PkgFacts, error) {
-	dir, err := resolveTargetDir(ctx, c.Target.Package, pkgArg, ".")
+	dir, err := resolveTargetDir(ctx, c.Target.Package, pkgArg, ".", c.Witness.Flags.Tags...)
 	if err != nil {
 		return "", facts.PkgFacts{}, err
 	}
-	f, err := facts.Scan(dir)
+	files, err := gotest.PackageFiles(ctx, dir, c.Witness.Flags.Tags)
+	if err != nil {
+		return "", facts.PkgFacts{}, err
+	}
+	f, err := facts.Scan(dir, files)
 	if err != nil {
 		return "", facts.PkgFacts{}, err
 	}
@@ -306,7 +310,7 @@ func replayCross(ctx context.Context, c domain.Capsule, pkgArg string, n int, po
 		return domain.Wrap(domain.ErrUsage, "cross-binary capsule carries no polluter steps")
 	}
 
-	polluterDir, err := resolveTargetDir(ctx, polluterPackage, polluterArg, ".")
+	polluterDir, err := resolveTargetDir(ctx, polluterPackage, polluterArg, ".", c.Witness.Flags.Tags...)
 	if err != nil {
 		return fmt.Errorf("polluter: %w", err)
 	}

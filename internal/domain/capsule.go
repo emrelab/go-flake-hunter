@@ -64,10 +64,11 @@ type Repo struct {
 
 // Tool is the tool's identity, for report reproducibility.
 type Tool struct {
-	Version string `json:"version"`
-	Go      string `json:"go"`
-	OS      string `json:"os"`
-	Arch    string `json:"arch"`
+	Version  string `json:"version"`
+	Go       string `json:"go"`
+	TargetGo string `json:"targetGo,omitempty"`
+	OS       string `json:"os"`
+	Arch     string `json:"arch"`
 }
 
 // Target is the test under investigation.

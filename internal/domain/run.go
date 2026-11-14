@@ -110,3 +110,9 @@ func FreshRuns(ctx context.Context) context.Context {
 
 // RequiresFreshRuns reports whether a caller needs a new observation.
 func RequiresFreshRuns(ctx context.Context) bool { v, _ := ctx.Value(freshRunsKey{}).(bool); return v }
+
+// PackageFiles is the active file set reported by go list.
+type PackageFiles struct {
+	Dir, ImportPath                              string
+	GoFiles, CgoFiles, TestGoFiles, XTestGoFiles []string
+}

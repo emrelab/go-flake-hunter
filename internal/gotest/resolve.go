@@ -21,7 +21,7 @@ import (
 //
 // Roots are directories. Nested modules are not descended into: each is its own
 // checkout and must be named as its own root.
-func ResolveImportDirs(ctx context.Context, roots []string) (map[string]string, error) {
+func ResolveImportDirs(ctx context.Context, roots []string, tags ...string) (map[string]string, error) {
 	out := make(map[string]string, len(roots))
 	for _, root := range roots {
 		abs, err := filepath.Abs(root)
@@ -32,7 +32,11 @@ func ResolveImportDirs(ctx context.Context, roots []string) (map[string]string, 
 		if err != nil {
 			return nil, domain.Wrap(domain.ErrUsage, "could not resolve %s: %v", root, err)
 		}
-		cmd := exec.CommandContext(ctx, "go", "list", "-e", "-f", "{{.ImportPath}}\t{{.Dir}}", "./...")
+		args := []string{"list", "-e", "-f", "{{.ImportPath}}\t{{.Dir}}"}
+		if len(tags) > 0 {
+			args = append(args, "-tags", strings.Join(tags, ","))
+		}
+		cmd := exec.CommandContext(ctx, "go", append(args, "./...")...)
 		cmd.Dir = abs
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout

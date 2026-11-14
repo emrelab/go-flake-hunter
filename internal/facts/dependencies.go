@@ -7,21 +7,15 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 )
 
 // externalDependencies is advisory syntax evidence, never a verdict about a
 // test or a reason to skip reproduction. Arguments and secret values are absent.
-func externalDependencies(dir string) []string {
-	entries, _ := os.ReadDir(dir)
+func externalDependencies(dir string, files []string) []string {
 	var out []string
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
-			continue
-		}
+	for _, name := range files {
 		src, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil || excludedByBuildTags(src) {
+		if err != nil {
 			continue
 		}
 		f, err := parser.ParseFile(token.NewFileSet(), name, src, 0)

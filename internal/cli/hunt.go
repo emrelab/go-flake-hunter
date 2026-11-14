@@ -262,7 +262,11 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 		return nil
 	}
 
-	pkgFacts, err := facts.Scan(dir)
+	files, err := gotest.PackageFiles(ctx, dir, tags)
+	if err != nil {
+		return err
+	}
+	pkgFacts, err := facts.Scan(dir, files)
 	if err != nil {
 		return domain.Wrap(domain.ErrUsage, "could not read %s", pkgArg)
 	}
@@ -327,6 +331,7 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 		res.Witness.Flags.Short = s.o.short
 		res.Witness.Flags.Tags = tags
 		c := buildCapsule(res.Witness, dir, s.repoStateFor(ctx, dir), pkgFacts, relDir, s.polluterRel())
+		c.Tool.TargetGo = gotest.TargetGoVersion(ctx, dir)
 		c.Note = note
 		if c.Witness.Flags.Race {
 			c.Note = "witness reproduced under -race"
@@ -599,6 +604,7 @@ func (s *scanner) writePartial(ctx context.Context, t domain.TestID, dir, relDir
 
 	note := partialNote(cause, s.o)
 	c := buildPartialCapsule(t, s.repoStateFor(ctx, dir), relDir, note)
+	c.Tool.TargetGo = gotest.TargetGoVersion(ctx, dir)
 
 	infos := attemptInfos(res)
 	path, err := capsule.NewStore(capsuleDir(s.o.dir, dir)).Write(c)
