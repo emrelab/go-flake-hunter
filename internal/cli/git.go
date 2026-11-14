@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/emrelab/go-flake-hunter/internal/domain"
 )
 
 // gitOutput runs one git command in dir and returns its trimmed stdout.
@@ -73,7 +75,9 @@ func readRepoState(ctx context.Context, dir string) repoState {
 			st.Commit = s
 		}
 	}
-	if out, err := gitOutput(gitCtx, dir, "status", "--porcelain"); err == nil {
+	if out, err := gitOutput(gitCtx, dir, "status", "--porcelain", "--untracked-files=all", "--",
+		":(top)**", ":(top,glob,exclude)**/"+domain.CapsuleDir+"/**",
+		":(top,glob,exclude)**/"+domain.WitnessFilePrefix+"*"+domain.WitnessFileSuffix); err == nil {
 		st.Dirty = strings.TrimSpace(out) != ""
 	}
 	return st

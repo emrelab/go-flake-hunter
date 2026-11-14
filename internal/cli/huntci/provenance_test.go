@@ -129,3 +129,32 @@ func TestAccumulates(t *testing.T) {
 		t.Errorf("JSON repo = %+v, want commit %q and dirty=true", doc.Repo, head)
 	}
 }
+
+func TestAuditC13_HuntOutputsDoNotDirtyCheckout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	dir := clitest.FixtureDir(t, "repeat-accumulate")
+	t.Chdir(dir)
+	for _, args := range [][]string{{"init"}, {"add", "."}, {"commit", "-m", "fixture"}} {
+		cmd := exec.Command("git", append([]string{"-c", "user.name=fixture", "-c", "user.email=fixture@example.com", "-c", "core.hooksPath="}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s (%v)", args, out, err)
+		}
+	}
+	for i := range 2 {
+		code, _, stderr := clitest.Run("hunt", ".")
+		if code != 0 {
+			t.Fatal(stderr)
+		}
+		store := capsule.NewStore(domain.CapsuleDir)
+		ids, err := store.List()
+		if err != nil || len(ids) != 1 {
+			t.Fatalf("capsules %v: %v", ids, err)
+		}
+		c, err := store.Read(ids[0])
+		if err != nil || c.Repo.Dirty {
+			t.Errorf("run %d: dirty=%t err=%v", i+1, c.Repo.Dirty, err)
+		}
+	}
+}
