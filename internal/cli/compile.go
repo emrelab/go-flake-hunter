@@ -40,7 +40,7 @@ func compileCmd(ctx context.Context, args []string, out IO) error {
 		return err
 	}
 
-	id, storeDir, pkgDir, err := resolveCapsule(fs.Args(), dir, pkg)
+	id, storeDir, _, err := resolveCapsule(fs.Args(), dir, pkg)
 	if err != nil {
 		return err
 	}
@@ -68,10 +68,12 @@ func compileCmd(ctx context.Context, args []string, out IO) error {
 			c.Repro.Command)
 	}
 
-	// The capsule is portable: if it does not carry its own directory, find
-	// the package hosting the victim. Otherwise compile called with
-	// `--capsule-dir /abs/path` would look for tests in cwd (go-flake-hunter's repo).
-	pkgDir, err = resolvePkgDir(pkgDir, c)
+	if pkg == "" && len(fs.Args()) == 1 {
+		if info, err := os.Stat(fs.Args()[0]); err == nil && info.IsDir() {
+			pkg = fs.Args()[0]
+		}
+	}
+	pkgDir, err := resolveTargetDir(ctx, c.Target.Package, pkg, ".")
 	if err != nil {
 		return err
 	}
@@ -327,41 +329,27 @@ func pkgOrDefault(pkg, fallback string) string {
 	return fallback
 }
 
-// resolvePkgDir picks the package directory to write into.
-//
-// A capsule carries Target.RelDir so it can travel in a PR comment or a CI
-// artifact. When the caller only names the store (--capsule-dir), the package
-// has to come from the capsule, not from the process cwd — otherwise compile
-// writes the regression test into whatever repository it happens to run in.
-//
-// "Exists" is therefore not enough to pick a candidate: "." exists in every
-// checkout, and it used to win before Target.RelDir was ever looked at. A
-// candidate wins by declaring the victim; the first existing directory is only
-// the fallback, so the complaint stays "test format" rather than "package not found".
-func resolvePkgDir(pkgDir string, c domain.Capsule) (string, error) {
-	candidates := []string{pkgDir, c.Target.RelDir, "."}
-	fallback := ""
-	for _, cand := range candidates {
-		if cand == "" {
-			continue
+// resolveTargetDir uses only checkout roots and directories selected by the operator.
+func resolveTargetDir(ctx context.Context, importPath, explicit, checkout string) (string, error) {
+	if explicit != "" {
+		dirs, err := gotest.ResolveImportDirs(ctx, []string{explicit})
+		if err != nil {
+			return "", err
 		}
-		if st, err := os.Stat(cand); err != nil || !st.IsDir() {
-			continue
+		abs, err := filepath.Abs(explicit)
+		if err == nil && dirs[importPath] != "" && canonical(dirs[importPath]) == canonical(abs) {
+			return abs, nil
 		}
-		if fallback == "" {
-			fallback = cand
-		}
-		if f, err := facts.Scan(cand); err == nil {
-			if _, ok := f.Clause[c.Witness.Victim.Name]; ok {
-				return cand, nil
-			}
-		}
+		return "", domain.Wrap(domain.ErrUsage, "--pkg %s does not match capsule package %s", explicit, importPath)
 	}
-	if fallback != "" {
-		return fallback, nil
+	dirs, err := resolveCheckoutDirs(ctx, checkout)
+	if err != nil {
+		return "", err
 	}
-	return "", domain.Wrap(domain.ErrUsage,
-		"package containing test %s not found; specify it with --pkg", c.Witness.Victim.Name)
+	if dir := dirs[importPath]; dir != "" {
+		return dir, nil
+	}
+	return "", domain.Wrap(domain.ErrUsage, "capsule package %s is outside this checkout; specify it with --pkg", importPath)
 }
 
 func newestIn(dir, pkgDir string) (string, string, error) {

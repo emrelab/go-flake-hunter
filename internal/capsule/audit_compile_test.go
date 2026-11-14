@@ -193,3 +193,19 @@ func TestAuditS4_RejectsPersistentSymlink(t *testing.T) {
 		t.Fatalf("outside symlink target was created: %v", err)
 	}
 }
+
+func TestAuditS5_CompileRejectsWrongModule(t *testing.T) {
+	dir := clitest.FixtureDir(t, "order-basic")
+	path := writeAuditCapsule(t, dir, "victim/TestVictim")
+	wrong := clitest.FixtureDir(t, "order-basic")
+	if err := os.WriteFile(filepath.Join(wrong, "go.mod"), []byte("module fixture/wrong\n\ngo 1.24\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(wrong)
+	for _, args := range [][]string{{"--pkg", wrong, path}, {"--capsule-dir", filepath.Dir(path)}} {
+		code, out, stderr := clitest.Run(append([]string{"compile", "--print"}, args...)...)
+		if code != domain.ExitUsage || out != "" || !strings.Contains(stderr, "fixture/orderbasic") {
+			t.Errorf("compile exit=%d stdout=%s stderr=%s", code, out, stderr)
+		}
+	}
+}

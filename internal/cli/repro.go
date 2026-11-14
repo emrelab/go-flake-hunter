@@ -111,15 +111,7 @@ func reproFromJSON(ctx context.Context, fromJSON string, o huntOptions, out IO) 
 	}
 	_, _ = fmt.Fprintf(out.Stderr, "from-json: %d failing tests\n", len(suspects))
 
-	root := "."
-	if dir, err := gitOutput(ctx, root, "rev-parse", "--show-toplevel"); err == nil {
-		root = dir
-	}
-	roots, err := checkoutModules(ctx, root)
-	if err != nil {
-		return err
-	}
-	dirs, err := gotest.ResolveImportDirs(ctx, roots)
+	dirs, err := resolveCheckoutDirs(ctx, ".")
 	if err != nil {
 		return err
 	}
@@ -156,6 +148,17 @@ func reproFromJSON(ctx context.Context, fromJSON string, o huntOptions, out IO) 
 		return runErr
 	}
 	return s.outcome(true)
+}
+
+func resolveCheckoutDirs(ctx context.Context, root string) (map[string]string, error) {
+	if dir, err := gitOutput(ctx, root, "rev-parse", "--show-toplevel"); err == nil {
+		root = dir
+	}
+	roots, err := checkoutModules(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	return gotest.ResolveImportDirs(ctx, roots)
 }
 
 // checkoutModules finds module roots without following directory symlinks.

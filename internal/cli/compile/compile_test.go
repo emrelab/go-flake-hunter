@@ -87,6 +87,7 @@ func TestCompilePrintDryRunAndWriteTarget(t *testing.T) {
 		t.Skip("integration test")
 	}
 	dir := clitest.FixtureDir(t, "order-basic")
+	t.Chdir(dir)
 	store := filepath.Join(t.TempDir(), "c")
 	if code, _, errOut := clitest.Run("hunt", dir, "-capsule-dir", store, "--format", "json"); code != domain.ExitOK {
 		t.Fatalf("hunt code=%d %s", code, errOut)
@@ -137,9 +138,6 @@ func TestCompilePrintDryRunAndWriteTarget(t *testing.T) {
 	}
 	if files := persistent(dir); len(files) != 1 {
 		t.Errorf("expected a single regression test in the package: %v", files)
-	}
-	if left := persistent("."); len(left) != 0 {
-		t.Errorf("written to cwd (the process directory was targeted): %v", left)
 	}
 }
 
