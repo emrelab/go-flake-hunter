@@ -917,4 +917,11 @@ func baselineMissing(path string) bool {
 	return os.IsNotExist(err)
 }
 
-func quoteArg(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
+// quoteArg renders one argument of a printed command so it survives the three
+// shells a user may paste it into: sh, cmd and PowerShell all strip double
+// quotes; POSIX single quotes are literal characters in cmd, which turned
+// `replay '<abs path>'` into a directory that does not exist (H-T1).
+//
+// shortcut: a path containing a double quote stays unquotable on Windows,
+// render per-shell once such a path exists in the wild.
+func quoteArg(s string) string { return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"` }

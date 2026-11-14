@@ -427,7 +427,7 @@ func TestAuditC6_PrintedReplayRunsFromCleanCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := strings.Split(c.Repro.Command, "'")
+	cmd := strings.Split(c.Repro.Command, `"`)
 	if !c.Witness.Flags.Short || len(cmd) != 5 || cmd[0] != "go-flake-hunter replay " || cmd[1] != s.Path(c.ID) || cmd[3] != dir {
 		t.Fatalf("printed command cannot reinstall the witness: %s", c.Repro.Command)
 	}

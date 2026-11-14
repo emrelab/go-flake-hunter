@@ -375,7 +375,7 @@ func CommandLine(c domain.Capsule) string {
 		short = "-short "
 	}
 	tags := strings.Join(append([]string{domain.PersistentBuildTag}, c.Witness.Flags.Tags...), ",")
-	base := fmt.Sprintf("go test %s%s%s -tags %s -run '^%s$'", race, short, relDir, tags, fn)
+	base := fmt.Sprintf("go test %s%s%s -tags %s -run \"^%s$\"", race, short, relDir, tags, fn)
 
 	switch c.Kind {
 	case domain.KindRepeat:

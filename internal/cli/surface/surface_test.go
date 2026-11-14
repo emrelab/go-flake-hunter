@@ -187,7 +187,7 @@ func TestInitAddsRecordedCapsuleGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"guard recorded flake", "replay '.go-flake-hunter/gfh_123.json' -n 3", "0/3) echo", `exit "$status"`, "contents: read"} {
+	for _, want := range []string{"guard recorded flake", `replay ".go-flake-hunter/gfh_123.json" -n 3`, "0/3) echo", `exit "$status"`, "contents: read"} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("missing %q: %s", want, data)
 		}
