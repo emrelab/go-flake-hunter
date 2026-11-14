@@ -134,10 +134,19 @@ func (e *Exec) Run(ctx context.Context, spec domain.RunSpec) (*domain.RunResult,
 	}
 
 	// Build failure: nothing ran, and the package did not compile.
-	if !timedOut && len(res.Outcomes) == 0 && exitCode != 0 {
+	if res.BuildFailed || !timedOut && len(res.Outcomes) == 0 && exitCode != 0 &&
+		(strings.Contains(res.BuildOutput, "[setup failed]") || strings.Contains(res.BuildOutput, "[build failed]")) {
 		res.BuildFailed = true
 		if strings.TrimSpace(res.BuildOutput) == "" {
 			res.BuildOutput = firstLines(stderr.String(), 5)
+		}
+	}
+	if !res.BuildFailed {
+		switch res.State {
+		case domain.RunPackageFailed:
+			return res, domain.Wrap(domain.ErrPackageFailed, "%s", spec.Package)
+		case domain.RunIncomplete:
+			return res, domain.Wrap(domain.ErrIncomplete, "%s", spec.Package)
 		}
 	}
 	return res, nil

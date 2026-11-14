@@ -51,7 +51,7 @@ func (p Env) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*domain.Wi
 	regex := "^" + tgt.Test.Name + "$"
 	spec := domain.RunSpec{Package: tgt.Dir, RunRegex: regex, Count: 1, Parallel: 1}
 
-	baseline, err := r.Run(ctx, spec)
+	baseline, err := runFor(ctx, r, tgt.Test.Name, spec)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (p Env) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*domain.Wi
 			probeSpec := spec
 			probeSpec.Env = []string{key + "=" + v}
 
-			res, err := r.Run(ctx, probeSpec)
+			res, err := runFor(ctx, r, tgt.Test.Name, probeSpec)
 			if err != nil {
 				return nil, err
 			}
@@ -110,11 +110,11 @@ func (p Env) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*domain.Wi
 func (p Env) verify(ctx context.Context, r gotest.Runner, base, variant domain.RunSpec, tgt Target, n int) error {
 	ctx = domain.FreshRuns(ctx)
 	for i := 0; i < n; i++ {
-		b, err := r.Run(ctx, base)
+		b, err := runFor(ctx, r, tgt.Test.Name, base)
 		if err != nil {
 			return err
 		}
-		v, err := r.Run(ctx, variant)
+		v, err := runFor(ctx, r, tgt.Test.Name, variant)
 		if err != nil {
 			return err
 		}

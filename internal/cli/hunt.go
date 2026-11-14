@@ -119,6 +119,8 @@ type scanner struct {
 	// collected holds the capsules a json run emits at the end. A streaming
 	// pretty-printer would produce one object per capsule — not JSON.
 	collected []domain.Capsule
+	results   []domain.PackageResult
+	broken    bool
 	cwd       string
 	// gitState memoizes the repo provenance per package directory: every
 	// capsule a package yields shares it, and asking git again per capsule
@@ -166,7 +168,7 @@ func (s *scanner) emit(c domain.Capsule) error {
 func (s *scanner) flush() error {
 	switch s.o.format {
 	case "json":
-		if err := report.JSONRun(s.out.Stdout, s.collected, s.budget.Runs(), s.budget.MaxRuns); err != nil {
+		if err := report.JSONRun(s.out.Stdout, s.collected, s.budget.Runs(), s.budget.MaxRuns, s.results); err != nil {
 			return err
 		}
 	case "sarif":
@@ -267,6 +269,21 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 	for _, t := range tests {
 		res, err := s.registry.Run(ctx, probe.Target{Test: t, Dir: dir, Facts: pkgFacts}, s.runner)
 		switch {
+		case errors.Is(err, domain.ErrBrokenTest):
+			s.broken = true
+			s.results = append(s.results, domain.PackageResult{Package: t.Package, Test: t.Name, Status: domain.RunBroken})
+			writer := s.out.Stdout
+			if s.o.format == "json" || s.o.format == "sarif" {
+				writer = s.out.Stderr
+			}
+			_, _ = fmt.Fprintf(writer, "%s:%s: broken (fails in isolation)\n", t.Package, t.Name)
+			continue
+		case errors.Is(err, domain.ErrPackageFailed):
+			s.results = append(s.results, domain.PackageResult{Package: t.Package, Test: t.Name, Status: domain.RunPackageFailed})
+			return err
+		case errors.Is(err, domain.ErrIncomplete):
+			s.results = append(s.results, domain.PackageResult{Package: t.Package, Test: t.Name, Status: domain.RunIncomplete})
+			return err
 		case errors.Is(err, domain.ErrNotReproducible) && res != nil && res.Suspected != nil:
 			res.Witness = res.Suspected
 		case errors.Is(err, probe.ErrNotReproduced):
@@ -350,7 +367,7 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 // the caller asked a question and did not get an answer.
 func (s *scanner) outcome(notFoundIsError bool) error {
 	switch {
-	case s.fresh > 0 && s.o.failOnFlake:
+	case (s.fresh > 0 || s.broken) && s.o.failOnFlake:
 		return domain.ErrFlakeFound
 	case s.found > 0:
 		return nil

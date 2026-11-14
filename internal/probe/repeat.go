@@ -43,7 +43,7 @@ func (p Repeat) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*domain
 	regex := "^" + tgt.Test.Name + "$"
 
 	// Repeated: state accumulates in-process.
-	rep, err := r.Run(ctx, domain.RunSpec{
+	rep, err := runFor(ctx, r, tgt.Test.Name, domain.RunSpec{
 		Package:  tgt.Dir,
 		RunRegex: regex,
 		Count:    count,
@@ -61,7 +61,7 @@ func (p Repeat) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*domain
 
 	// It failed. Broken or flaky? A single run decides: broken tests fail
 	// alone too, and no ordering edit or repeat count will help them.
-	base, err := r.Run(ctx, domain.RunSpec{
+	base, err := runFor(ctx, r, tgt.Test.Name, domain.RunSpec{
 		Package:  tgt.Dir,
 		RunRegex: regex,
 		Count:    1,
@@ -74,17 +74,20 @@ func (p Repeat) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*domain
 	}
 	if base.Failed(tgt.Test.Name) {
 		// Fails on its own too: not a flake, a broken test.
-		return nil, ErrNotReproduced
+		return nil, domain.ErrBrokenTest
 	}
 
 	// Confirm determinism: a single failing round can be noise.
-	again, err := r.Run(domain.FreshRuns(ctx), domain.RunSpec{
+	again, err := runFor(domain.FreshRuns(ctx), r, tgt.Test.Name, domain.RunSpec{
 		Package:  tgt.Dir,
 		RunRegex: regex,
 		Count:    count,
 	})
 	if err != nil {
 		return nil, err
+	}
+	if again.BuildFailed {
+		return nil, buildFailed(tgt, again)
 	}
 	if !again.Failed(tgt.Test.Name) {
 		return nil, domain.Wrap(domain.ErrNotReproducible, "%s did not fail on the second -count=%d run", tgt.Test.Name, count)

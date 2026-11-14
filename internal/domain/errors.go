@@ -18,7 +18,10 @@ var (
 	// ErrBudgetExceeded run or time budget exceeded.
 	ErrBudgetExceeded = errors.New("budget exceeded")
 	// ErrBuildFailed the package does not compile; not a flake, a user error.
-	ErrBuildFailed = errors.New("package failed to build")
+	ErrBuildFailed   = errors.New("package failed to build")
+	ErrPackageFailed = errors.New("package failed")
+	ErrIncomplete    = errors.New("test run incomplete")
+	ErrBrokenTest    = errors.New("test fails in isolation")
 	// ErrUsage bad argument.
 	ErrUsage = errors.New("usage error")
 	// ErrFlakeFound the CI gate with --fail-on-flake.
@@ -36,6 +39,7 @@ const (
 	ExitBudget        = 4
 	ExitUnsupported   = 5
 	ExitBuildFailed   = 6
+	ExitPackageFailed = 7
 	ExitCanceled      = 130 // 128+SIGINT: shell convention; CI reads it as "stopped manually"
 	ExitInternal      = 10
 )
@@ -58,6 +62,8 @@ func ExitCode(err error) int {
 		return ExitUnsupported
 	case errors.Is(err, ErrBuildFailed):
 		return ExitBuildFailed
+	case errors.Is(err, ErrPackageFailed), errors.Is(err, ErrIncomplete):
+		return ExitPackageFailed
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		// Cancellation is not a fault but the user's decision: 10 (internal error) would be wrong.
 		return ExitCanceled

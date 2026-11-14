@@ -33,6 +33,7 @@ func parseEvents(data []byte, spec domain.RunSpec, exitCode int, elapsed time.Du
 	res := &domain.RunResult{
 		Spec:     spec,
 		Outcomes: make(map[string]domain.Outcome),
+		Terminal: make(map[string]int),
 		ExitCode: exitCode,
 		Duration: elapsed,
 		TimedOut: timedOut,
@@ -44,6 +45,8 @@ func parseEvents(data []byte, spec domain.RunSpec, exitCode int, elapsed time.Du
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024) // test output lines can be long
 
 	seen := make(map[string]bool)
+	started := make(map[string]int)
+	var packageAction string
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 || line[0] != '{' {
@@ -54,6 +57,12 @@ func parseEvents(data []byte, spec domain.RunSpec, exitCode int, elapsed time.Du
 			continue // a single corrupt record must not sink the whole run
 		}
 		if ev.Test == "" {
+			switch ev.Action {
+			case "pass", "fail", "skip":
+				packageAction = ev.Action
+			case "build-fail":
+				res.BuildFailed = true
+			}
 			// Package-level events. Build errors arrive here
 			// (Action:"output", Test:"") and are kept for BuildOutput.
 			if ev.Action == "output" && ev.Output != "" {
@@ -69,6 +78,7 @@ func parseEvents(data []byte, spec domain.RunSpec, exitCode int, elapsed time.Du
 
 		switch ev.Action {
 		case "run":
+			started[ev.Test]++
 			if !strings.Contains(ev.Test, "/") && !seen[ev.Test] {
 				seen[ev.Test] = true
 				res.Order = append(res.Order, ev.Test)
@@ -79,6 +89,7 @@ func parseEvents(data []byte, spec domain.RunSpec, exitCode int, elapsed time.Du
 			}
 			outputs[ev.Test].WriteString(ev.Output)
 		case "pass", "fail", "skip":
+			res.Terminal[ev.Test]++
 			st := statusOf(ev.Action)
 			prev, ok := res.Outcomes[ev.Test]
 			o := domain.Outcome{
@@ -100,6 +111,29 @@ func parseEvents(data []byte, spec domain.RunSpec, exitCode int, elapsed time.Du
 		res.BuildOutput += b.String()
 	}
 	res.BuildOutput = Normalize(res.BuildOutput)
+
+	switch {
+	case timedOut || packageAction == "" || exitCode < 0:
+		res.State = domain.RunIncomplete
+	case packageAction == "fail" && exitCode != 0:
+		res.State = domain.RunPackageFailed
+		for _, outcome := range res.Outcomes {
+			if outcome.Status == domain.StatusFail {
+				res.State = domain.RunTestFailed
+				break
+			}
+		}
+	case (packageAction == "pass" || packageAction == "skip") && exitCode == 0:
+		res.State = domain.RunPassed
+	default:
+		res.State = domain.RunIncomplete
+	}
+	for name, runs := range started {
+		if res.Terminal[name] < runs {
+			res.State = domain.RunIncomplete
+			break
+		}
+	}
 
 	// Attach output to outcomes that never got a terminal event (timeout case).
 	for name, b := range outputs {

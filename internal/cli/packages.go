@@ -77,6 +77,8 @@ func (s *scanner) packages(ctx context.Context, dirs []string, jobs int) error {
 		s.fresh += r.child.fresh
 		s.ids = append(s.ids, r.child.ids...)
 		s.collected = append(s.collected, r.child.collected...)
+		s.results = append(s.results, r.child.results...)
+		s.broken = s.broken || r.child.broken
 		if r.err != nil && first == nil {
 			first = r.err
 		}

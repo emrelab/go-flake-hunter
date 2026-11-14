@@ -53,6 +53,34 @@ type RunResult struct {
 	ExitCode    int
 	Duration    time.Duration
 	TimedOut    bool
+	State       RunState
+	Terminal    map[string]int // terminal events by test, including repeated rounds
+}
+
+type RunState string
+
+const (
+	RunPassed        RunState = "passed"
+	RunTestFailed    RunState = "test-failed"
+	RunPackageFailed RunState = "package-failed"
+	RunIncomplete    RunState = "incomplete"
+	RunBroken        RunState = "broken"
+)
+
+type PackageResult struct {
+	Package string   `json:"package"`
+	Test    string   `json:"test,omitempty"`
+	Status  RunState `json:"status"`
+}
+
+// Completed requires all expected terminal events. Fake runners usually supply
+// only outcomes, so they can model one completed observation without a stream.
+func (r *RunResult) Completed(name string, count int) bool {
+	if r.Terminal != nil {
+		return r.Terminal[name] >= count
+	}
+	_, ok := r.Outcomes[name]
+	return ok
 }
 
 // Status returns a test's outcome safely (StatusSkip if absent from the map).

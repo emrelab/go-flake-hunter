@@ -134,3 +134,12 @@ func (r *Registry) Run(ctx context.Context, tgt Target, runner gotest.Runner) (*
 func isNotReproduced(err error) bool {
 	return err != nil && (errorsIs(err, domain.ErrNotReproduced))
 }
+
+// runFor rejects a real run that lacks a terminal result for the probe's victim.
+func runFor(ctx context.Context, r gotest.Runner, name string, spec domain.RunSpec) (*domain.RunResult, error) {
+	res, err := r.Run(ctx, spec)
+	if err == nil && !res.BuildFailed && res.Terminal != nil && !res.Completed(name, spec.WithDefaults().Count) {
+		err = domain.Wrap(domain.ErrIncomplete, "missing results for %s", name)
+	}
+	return res, err
+}

@@ -56,7 +56,7 @@ func (p Parallel) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*doma
 	regex := "^" + tgt.Test.Name + "$"
 
 	// (1) Alone: a test that fails on its own is broken, not concurrent.
-	alone, err := r.Run(ctx, domain.RunSpec{
+	alone, err := runFor(ctx, r, tgt.Test.Name, domain.RunSpec{
 		Package: tgt.Dir, RunRegex: regex, Count: 1, Parallel: 1,
 	})
 	if err != nil {
@@ -72,7 +72,7 @@ func (p Parallel) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*doma
 	// (2) Whose bug is it? If the package already fails single-threaded, the
 	// flake is about ordering, and the order probe owns it. Answering here too
 	// would let two probes claim the same capsule with different witnesses.
-	serial, err := r.Run(ctx, domain.RunSpec{Package: tgt.Dir, Count: 1, Parallel: 1})
+	serial, err := runFor(ctx, r, tgt.Test.Name, domain.RunSpec{Package: tgt.Dir, Count: 1, Parallel: 1})
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func (p Parallel) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*doma
 	// (3) The whole package, overlapped. This is the cheap existential check:
 	// without it there is nothing to minimize and no reason to build witnesses.
 	width := concurrencyWidth(len(tgt.Facts.Clause))
-	conc, err := r.Run(ctx, domain.RunSpec{Package: tgt.Dir, Count: 1, Parallel: width})
+	conc, err := runFor(ctx, r, tgt.Test.Name, domain.RunSpec{Package: tgt.Dir, Count: 1, Parallel: width})
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +194,7 @@ func (p Parallel) predicate(tgt Target, r gotest.Runner, clause, fn string) sear
 		}
 		defer func() { _ = h.Remove() }()
 
-		res, err := r.Run(ctx, domain.RunSpec{
+		res, err := runFor(ctx, r, domain.WitnessSubtest(fn, tgt.Test.Name), domain.RunSpec{
 			Package:  tgt.Dir,
 			RunRegex: "^" + fn + "$",
 			Count:    1,

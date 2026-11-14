@@ -29,7 +29,7 @@ func ConfirmRace(ctx context.Context, tgt Target, w *domain.Witness, r gotest.Ru
 		return false, "race confirmation is not available for a cross-binary sequence", nil
 	}
 	if w.CrossClause {
-		res, e := r.Run(domain.FreshRuns(ctx), domain.RunSpec{Package: tgt.Dir, RunRegex: domain.SelectionRegex(*w), Count: 1, Parallel: 1, ShuffleSeed: w.Seed, Race: true})
+		res, e := runFor(domain.FreshRuns(ctx), r, tgt.Test.Name, domain.RunSpec{Package: tgt.Dir, RunRegex: domain.SelectionRegex(*w), Count: 1, Parallel: 1, ShuffleSeed: w.Seed, Race: true})
 		if e != nil {
 			return false, "", e
 		}
@@ -99,7 +99,7 @@ func confirmChain(ctx context.Context, tgt Target, w *domain.Witness, r gotest.R
 	if w.Flags.Parallel > 0 {
 		width = w.Flags.Parallel
 	}
-	res, err := r.Run(ctx, domain.RunSpec{
+	res, err := runFor(ctx, r, domain.WitnessSubtest(fn, tgt.Test.Name), domain.RunSpec{
 		Package:  tgt.Dir,
 		RunRegex: "^" + fn + "$",
 		Count:    1,
@@ -131,7 +131,7 @@ func confirmRepeat(ctx context.Context, tgt Target, w *domain.Witness, r gotest.
 	if count <= 0 {
 		count = DefaultRepeatCount
 	}
-	res, err := r.Run(ctx, domain.RunSpec{
+	res, err := runFor(ctx, r, tgt.Test.Name, domain.RunSpec{
 		Package:  tgt.Dir,
 		RunRegex: "^" + tgt.Test.Name + "$",
 		Count:    count,

@@ -14,24 +14,29 @@ import (
 // prints nothing at all gives a consumer no way to tell "no flakes" from "the
 // tool crashed". Flakes is always an array, empty when nothing was found.
 type RunReport struct {
-	Schema  string           `json:"schema"`
-	Flakes  []domain.Capsule `json:"flakes"`
-	Runs    int              `json:"runs"`
-	MaxRuns int              `json:"maxRuns,omitempty"`
+	Schema   string                 `json:"schema"`
+	Flakes   []domain.Capsule       `json:"flakes"`
+	Runs     int                    `json:"runs"`
+	MaxRuns  int                    `json:"maxRuns,omitempty"`
+	Packages []domain.PackageResult `json:"packages"`
 }
 
 // JSONRun writes the run report.
-func JSONRun(w io.Writer, flakes []domain.Capsule, runs, maxRuns int) error {
+func JSONRun(w io.Writer, flakes []domain.Capsule, runs, maxRuns int, packages []domain.PackageResult) error {
 	if flakes == nil {
 		flakes = []domain.Capsule{}
+	}
+	if packages == nil {
+		packages = []domain.PackageResult{}
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(RunReport{
-		Schema:  domain.SchemaVersion,
-		Flakes:  flakes,
-		Runs:    runs,
-		MaxRuns: maxRuns,
+		Schema:   domain.SchemaVersion,
+		Flakes:   flakes,
+		Runs:     runs,
+		MaxRuns:  maxRuns,
+		Packages: packages,
 	})
 }
 

@@ -90,7 +90,7 @@ func (p Order) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*domain.
 	// cached for every other test in this package: it answers both "does the
 	// package already fail in its default order?" and "is this test broken on
 	// its own?" for the common case.
-	all, err := r.Run(ctx, domain.RunSpec{Package: tgt.Dir, Count: 1, Parallel: 1})
+	all, err := runFor(ctx, r, tgt.Test.Name, domain.RunSpec{Package: tgt.Dir, Count: 1, Parallel: 1})
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func (p Order) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*domain.
 	// (2) Alone, single-threaded. Only paid when the package run failed: a test
 	// that fails by itself is broken, not flaky, and no ordering edit will help.
 	if all.Failed(tgt.Test.Name) {
-		alone, err := r.Run(ctx, domain.RunSpec{
+		alone, err := runFor(ctx, r, tgt.Test.Name, domain.RunSpec{
 			Package: tgt.Dir, RunRegex: regex, Count: 1, Parallel: 1,
 		})
 		if err != nil {
@@ -122,7 +122,7 @@ func (p Order) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*domain.
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		res, err := r.Run(ctx, domain.RunSpec{
+		res, err := runFor(ctx, r, tgt.Test.Name, domain.RunSpec{
 			Package: tgt.Dir, Count: 1, Parallel: 1, ShuffleSeed: seed,
 		})
 		if err != nil {
@@ -235,7 +235,7 @@ func (p Order) predicate(tgt Target, r gotest.Runner, clause, fn string) search.
 		// Remove even on panic: a leaked witness poisons every later build.
 		defer func() { _ = h.Remove() }()
 
-		res, err := r.Run(ctx, domain.RunSpec{
+		res, err := runFor(ctx, r, domain.WitnessSubtest(fn, tgt.Test.Name), domain.RunSpec{
 			Package:  tgt.Dir,
 			RunRegex: "^" + fn + "$",
 			Count:    1,
@@ -338,7 +338,7 @@ func before(order []string, victim string) []domain.TestID {
 func (p Order) minimizeSelection(ctx context.Context, tgt Target, r gotest.Runner, candidates []domain.TestID, verify int, seed int64) (*domain.Witness, error) {
 	pred := func(ctx context.Context, subset []domain.TestID) (bool, error) {
 		w := domain.Witness{Victim: tgt.Test, Polluters: subset}
-		res, err := r.Run(ctx, domain.RunSpec{Package: tgt.Dir, RunRegex: domain.SelectionRegex(w), Count: 1, Parallel: 1, ShuffleSeed: seed})
+		res, err := runFor(ctx, r, tgt.Test.Name, domain.RunSpec{Package: tgt.Dir, RunRegex: domain.SelectionRegex(w), Count: 1, Parallel: 1, ShuffleSeed: seed})
 		if err != nil {
 			return false, err
 		}

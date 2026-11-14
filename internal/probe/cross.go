@@ -82,7 +82,7 @@ func (p OrderCross) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*do
 	// polluted. This is also the baseline the whole witness is "difference
 	// against": without a passing alone-run, "it failed after the polluter"
 	// proves nothing.
-	base, err := r.Run(ctx, victim)
+	base, err := runFor(ctx, r, tgt.Test.Name, victim)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (p OrderCross) Probe(ctx context.Context, tgt Target, r gotest.Runner) (*do
 		}
 		s2 := victim
 		s2.Source = fmt.Sprintf("cross/%d/2", round)
-		res2, err := r.Run(ctx, s2)
+		res2, err := runFor(ctx, r, tgt.Test.Name, s2)
 		if err != nil {
 			return false, err
 		}

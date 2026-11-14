@@ -49,15 +49,15 @@ func TestRepeatFindsAccumulation(t *testing.T) {
 }
 
 // A test that fails on its own is broken, not flaky: repeat does not explain it.
-func TestRepeatIgnoresAlwaysFailing(t *testing.T) {
+func TestRepeatReportsAlwaysFailing(t *testing.T) {
 	tgt := probe.Target{Test: victim(), Dir: "dir"}
 	fake := &gotest.Fake{RunFn: func(s domain.RunSpec) (*domain.RunResult, error) {
 		return gotest.Result(s, map[string]domain.Status{"TestA": domain.StatusFail}), nil
 	}}
 
 	_, err := probe.Repeat{}.Probe(context.Background(), tgt, fake)
-	if !errors.Is(err, domain.ErrNotReproduced) {
-		t.Fatalf("expected ErrNotReproduced, got %v", err)
+	if !errors.Is(err, domain.ErrBrokenTest) {
+		t.Fatalf("expected ErrBrokenTest, got %v", err)
 	}
 	// Two runs: -count=10 (failed) + baseline (fails alone too → broken).
 	// No third verification run: there is no witness, no point gathering evidence.
