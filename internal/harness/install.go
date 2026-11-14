@@ -5,9 +5,13 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -96,7 +100,7 @@ func (h *Harness) Path() string { return h.path }
 func (h *Harness) Remove() error {
 	h.once.Do(func() {
 		if h.file != nil {
-			info, err := ownedWitness(h.path)
+			info, err := ownedWitness(h.path, false)
 			if err == nil && info != nil && os.SameFile(info, h.file) {
 				_, err = removeWitness(h.path, info)
 			}
@@ -120,7 +124,7 @@ func CleanupStale(pkgDir string) ([]string, error) {
 			continue
 		}
 		p := filepath.Join(pkgDir, e.Name())
-		info, err := ownedWitness(p)
+		info, err := ownedWitness(p, true)
 		if err != nil {
 			return removed, err
 		}
@@ -135,7 +139,7 @@ func CleanupStale(pkgDir string) ([]string, error) {
 	return removed, nil
 }
 
-func ownedWitness(path string) (fs.FileInfo, error) {
+func ownedWitness(path string, allowLegacy bool) (fs.FileInfo, error) {
 	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -151,10 +155,46 @@ func ownedWitness(path string) (fs.FileInfo, error) {
 		return nil, err
 	}
 	header, body, ok := bytes.Cut(src, []byte("\n"))
-	if !ok || string(header) != witnessMarker+witnessDigest(body) {
-		return nil, nil
+	if ok && string(header) == witnessMarker+witnessDigest(body) {
+		return info, nil
 	}
-	return info, nil
+	if allowLegacy && isLegacyWitness(src) {
+		return info, nil
+	}
+	return nil, nil
+}
+
+var legacyWitnessName = regexp.MustCompile(`^` + domain.WitnessFuncName + `(_[0-9]+)?$`)
+
+func isLegacyWitness(src []byte) bool {
+	if !bytes.HasPrefix(src, []byte(witnessHeader)) {
+		return false
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), "", src, parser.SkipObjectResolution)
+	if err != nil || len(file.Decls) != 2 || len(file.Imports) != 1 {
+		return false
+	}
+	imp := file.Imports[0]
+	fn, ok := file.Decls[1].(*ast.FuncDecl)
+	if imp.Name != nil || imp.Path.Value != `"testing"` ||
+		!ok || fn.Recv != nil || fn.Body == nil || !legacyWitnessName.MatchString(fn.Name.Name) ||
+		fn.Type.TypeParams != nil || fn.Type.Results != nil || len(fn.Type.Params.List) != 1 {
+		return false
+	}
+	param := fn.Type.Params.List[0]
+	if len(param.Names) != 1 || param.Names[0].Name != "t" {
+		return false
+	}
+	ptr, ok := param.Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := ptr.X.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "T" {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == "testing"
 }
 
 func removeWitness(path string, expected fs.FileInfo) (bool, error) {
