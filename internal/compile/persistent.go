@@ -133,6 +133,7 @@ type templateData struct {
 
 var (
 	envKey          = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	buildTag        = regexp.MustCompile(`^[A-Za-z0-9_.]+$`)
 	plainPackageArg = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
 )
 
@@ -164,6 +165,11 @@ func Render(c domain.Capsule, clause string) ([]byte, error) {
 	for _, key := range c.Witness.EnvDiff {
 		if !envKey.MatchString(key) {
 			return nil, domain.Wrap(domain.ErrUsage, "invalid environment variable name %q", key)
+		}
+	}
+	for _, tag := range c.Witness.Flags.Tags {
+		if !buildTag.MatchString(tag) {
+			return nil, domain.Wrap(domain.ErrUsage, "invalid build tag %q", tag)
 		}
 	}
 	body, err := bodyFor(c.Kind)
@@ -364,11 +370,16 @@ func CommandLine(c domain.Capsule) string {
 	if c.Witness.Flags.Race {
 		race = "-race "
 	}
-	base := fmt.Sprintf("go test %s%s -tags %s -run '^%s$'", race, relDir, domain.PersistentBuildTag, fn)
+	short := ""
+	if c.Witness.Flags.Short {
+		short = "-short "
+	}
+	tags := strings.Join(append([]string{domain.PersistentBuildTag}, c.Witness.Flags.Tags...), ",")
+	base := fmt.Sprintf("go test %s%s%s -tags %s -run '^%s$'", race, short, relDir, tags, fn)
 
 	switch c.Kind {
 	case domain.KindRepeat:
-		return fmt.Sprintf("%s%s -count=%d", prefix.String(), base, repeatCount(c))
+		return fmt.Sprintf("%s%s -count=1", prefix.String(), base)
 	case domain.KindEnv:
 		// The victim itself, not a narrowed witness: the difference is only in the env.
 		return fmt.Sprintf("%s%s -count=1", prefix.String(), base)
@@ -388,7 +399,8 @@ func VerifySpec(c domain.Capsule, dir string) domain.RunSpec {
 		Package:  dir,
 		RunRegex: "^" + domain.PersistentFuncName(c.Witness.Victim.Name) + "$",
 		Count:    1,
-		Tags:     []string{domain.PersistentBuildTag},
+		Tags:     append([]string{domain.PersistentBuildTag}, c.Witness.Flags.Tags...),
+		Short:    c.Witness.Flags.Short,
 		Parallel: 1,
 		// If the witness was found with -race, verification must run -race too:
 		// otherwise on a race-only flake the artifact stays green and --verify

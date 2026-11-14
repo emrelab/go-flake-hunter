@@ -153,7 +153,7 @@ func TestHuntCrossBinaryEndToEnd(t *testing.T) {
 	if len(c.Witness.Polluters) != 1 || c.Witness.Polluters[0].Name != "TestBad" {
 		t.Errorf("polluters = %v, want [TestBad] only", c.Witness.Polluters)
 	}
-	if !strings.Contains(c.Repro.Command, "&&") || !strings.Contains(c.Repro.Command, "TestBad") {
+	if !strings.Contains(c.Repro.Command, "go-flake-hunter replay") || !strings.Contains(c.Repro.Command, "--polluter-pkg") {
 		t.Errorf("the capsule command must be the two-stage reproduction: %q", c.Repro.Command)
 	}
 
@@ -162,7 +162,7 @@ func TestHuntCrossBinaryEndToEnd(t *testing.T) {
 	if code != domain.ExitUnsupported {
 		t.Fatalf("compile code=%d want %d (%s)", code, domain.ExitUnsupported, errOut)
 	}
-	if !strings.Contains(errOut, "reproduces with: go test") {
+	if !strings.Contains(errOut, "reproduces with: go-flake-hunter replay") {
 		t.Errorf("the refusal must carry the command: %q", errOut)
 	}
 
@@ -218,7 +218,7 @@ func TestCrossClauseSharedMemoryLifecycle(t *testing.T) {
 		t.Fatalf("replay %d %s %s", code, out, errs)
 	}
 	code, _, errs = clitest.Run("compile", ids[0], "--pkg", dir, "--capsule-dir", store)
-	if code != domain.ExitUnsupported || !strings.Contains(errs, "go test") {
+	if code != domain.ExitUnsupported || !strings.Contains(errs, "go-flake-hunter replay") {
 		t.Fatalf("compile %d %s", code, errs)
 	}
 }

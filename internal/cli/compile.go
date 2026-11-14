@@ -54,19 +54,6 @@ func compileCmd(ctx context.Context, args []string, out IO) error {
 	if c.Status != domain.StatusConfirmed {
 		return domain.Wrap(domain.ErrUnsupportedTest, "only confirmed capsules can be compiled; %s is %s", c.ID, c.Status)
 	}
-	if c.Witness.CrossClause {
-		return domain.Wrap(domain.ErrUnsupportedTest, "tests in different package clauses cannot be called from one generated file; reproduce with: %s", c.Repro.Command)
-	}
-
-	// A cross-binary witness (#6) cannot become a single regression test file:
-	// its reproduction is two `go test` processes. Refusing with the command
-	// attached turns the exit 5 into a copy-pasteable action instead of a dead
-	// end; the scaffold from `go-flake-hunter init` runs that command as the gate.
-	if c.Witness.CrossBinary {
-		return domain.Wrap(domain.ErrUnsupportedTest,
-			"this witness spans two test binaries and cannot be a regression test file; it reproduces with: %s",
-			c.Repro.Command)
-	}
 
 	if pkg == "" && len(fs.Args()) == 1 {
 		if info, err := os.Stat(fs.Args()[0]); err == nil && info.IsDir() {
@@ -77,6 +64,22 @@ func compileCmd(ctx context.Context, args []string, out IO) error {
 	if err != nil {
 		return err
 	}
+
+	if c.Witness.CrossClause {
+		return domain.Wrap(domain.ErrUnsupportedTest, "tests in different package clauses cannot be called from one generated file; reproduce with: %s", reproCommand(c, store.Path(id), pkgDir, ""))
+	}
+
+	// A cross-binary witness (#6) cannot become a single regression test file:
+	// its reproduction is two `go test` processes. Refusing with the command
+	// attached turns the exit 5 into a copy-pasteable action instead of a dead
+	// end; the scaffold from `go-flake-hunter init` runs that command as the gate.
+	if c.Witness.CrossBinary {
+		return domain.Wrap(domain.ErrUnsupportedTest,
+			"this witness spans two test binaries and cannot be a regression test file; it reproduces with: %s",
+			reproCommand(c, store.Path(id), pkgDir, ""))
+	}
+
+	c.Target.RelDir = pkgDir
 
 	// Clause determines which test package the generated test belongs to.
 	f, err := facts.Scan(pkgDir)

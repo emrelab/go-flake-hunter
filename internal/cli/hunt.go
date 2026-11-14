@@ -225,6 +225,7 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 		return domain.Wrap(domain.ErrUsage, "%s is not a directory", pkgArg)
 	}
 	relDir := s.relDir(dir)
+	tags := gotest.BuildTags(ctx, dir)
 
 	// Crash leftover: if the previous run was killed, a witness file remains
 	// and breaks every build in this package.
@@ -323,13 +324,18 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 			note = raceNote
 		}
 
+		res.Witness.Flags.Short = s.o.short
+		res.Witness.Flags.Tags = tags
 		c := buildCapsule(res.Witness, dir, s.repoStateFor(ctx, dir), pkgFacts, relDir, s.polluterRel())
 		c.Note = note
+		if c.Witness.Flags.Race {
+			c.Note = "witness reproduced under -race"
+		}
 		if c.Status == domain.StatusSuspected {
 			c.Note = "partial reproduction; not confirmed and excluded from the CI flake gate and baseline"
-			c.Repro.Command = fmt.Sprintf("go-flake-hunter replay %s --pkg %s --capsule-dir %s -n 10", c.ID, quoteArg(dir), quoteArg(capsuleDir(s.o.dir, dir)))
 		}
 		store := capsule.NewStore(capsuleDir(s.o.dir, dir))
+		c.Repro.Command = reproCommand(c, store.Path(c.ID), dir, s.o.polluterDir)
 		path, err := store.Write(c)
 		if err != nil {
 			return err
@@ -722,7 +728,6 @@ func buildCapsule(w *domain.Witness, dir string, st repoState, f facts.PkgFacts,
 	}
 	c.Witness.Steps = stepsFor(w)
 	c.ID = capsule.ID(c.Witness, st.Module, st.Commit)
-	c.Repro.Command = reproCommand(c)
 	c.Repro.GeneratedTest = compile.OutputName(dir, targetSourceFile(dir, w.Victim.Name), w.Victim.Name)
 	if c.Status != domain.StatusConfirmed || w.CrossClause || w.CrossBinary {
 		c.Repro.GeneratedTest = ""
@@ -767,80 +772,15 @@ func stepsFor(w *domain.Witness) []domain.Step {
 	return steps
 }
 
-// reproCommand is the exact shell line that reproduces the flake.
-//
-// Every branch is derived from the witness, never hardcoded: a parallel
-// witness replayed with -parallel=1 executes its subtests one after another
-// and proves nothing, which is the worst possible artifact — a command that
-// looks right and reports "passed".
-func reproCommand(c domain.Capsule) string {
-	dir := c.Target.RelDir
-	if dir == "" {
-		dir = "."
+func reproCommand(c domain.Capsule, path, dir, polluterDir string) string {
+	command := "go-flake-hunter replay " + quoteArg(path) + " --pkg " + quoteArg(dir) + " -n 1"
+	if c.Witness.CrossBinary && polluterDir != "" {
+		command += " --polluter-pkg " + quoteArg(polluterDir)
 	}
-
-	if c.Witness.CrossClause {
-		race := ""
-		if c.Witness.Flags.Race {
-			race = " -race"
-		}
-		return fmt.Sprintf("go test%s %s -run %s -count=1 -parallel=1 -shuffle=%s", race, quoteArg(dir), quoteArg(domain.SelectionRegex(c.Witness)), shuffleArgument(c.Witness.Seed))
+	if c.Kind == domain.KindEnv && len(c.Witness.EnvDiff) > 0 {
+		command += " --env " + quoteArg(c.Witness.EnvDiff[0]+"="+policy.RedactionPlaceholder)
 	}
-
-	// A cross-binary witness (#6) is not a test file, it is a sequence of two
-	// `go test` processes. The command IS the reproduction contract: compile
-	// refuses these capsules, so this line is the permanent record.
-	if c.Witness.CrossBinary {
-		polluterDir := c.Target.PolluterRelDir
-		if polluterDir == "" {
-			polluterDir = dir
-		}
-		names := make([]string, 0, len(c.Witness.Polluters))
-		for _, p := range c.Witness.Polluters {
-			names = append(names, p.Name)
-		}
-		return fmt.Sprintf("go test %s -run '^(%s)$' -count=1 -parallel=1 && go test %s -run '^%s$' -count=1",
-			polluterDir, strings.Join(names, "|"), dir, c.Witness.Victim.Name)
-	}
-
-	var b strings.Builder
-	// For env flakes the value is not written to the capsule; the user puts
-	// their own value in. Leaving it empty would break the command.
-	for _, key := range c.Witness.EnvDiff {
-		fmt.Fprintf(&b, "%s=%s ", key, policy.RedactionPlaceholder)
-	}
-
-	switch c.Kind {
-	case domain.KindRepeat:
-		count := c.Witness.Flags.Count
-		if count <= 0 {
-			count = probe.DefaultRepeatCount
-		}
-		fmt.Fprintf(&b, "go test %s -run '^%s$' -count=%d",
-			dir, c.Witness.Victim.Name, count)
-	case domain.KindEnv:
-		// The victim itself, not a shrunk witness: the difference is only the environment.
-		fmt.Fprintf(&b, "go test %s -run '^%s$' -count=1",
-			dir, c.Witness.Victim.Name)
-	default:
-		parallel := c.Witness.Flags.Parallel
-		if parallel <= 0 {
-			parallel = 1
-		}
-		// -race is part of the witness: if it drops from the command, the user
-		// reproduces only the ordering, not the race.
-		race := ""
-		if c.Witness.Flags.Race {
-			race = "-race "
-		}
-		// The witness function name comes from the capsule, never from a
-		// constant: a package that defines its own TestFlakeWitness made the
-		// probe pick TestFlakeWitness_2, and printing the bare name handed the
-		// user a command that runs THEIR test and reports a pass.
-		fmt.Fprintf(&b, "go test %s%s -run '^%s$' -count=1 -parallel=%d",
-			race, dir, c.Witness.FuncName(), parallel)
-	}
-	return b.String()
+	return command
 }
 
 // reorderFlags moves flags in front of positional arguments.
@@ -956,13 +896,6 @@ func modulePath(dir string) string {
 func baselineMissing(path string) bool {
 	_, err := os.Stat(path)
 	return os.IsNotExist(err)
-}
-
-func shuffleArgument(seed int64) string {
-	if seed == 0 {
-		return "off"
-	}
-	return fmt.Sprint(seed)
 }
 
 func quoteArg(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }

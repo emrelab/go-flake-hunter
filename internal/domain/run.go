@@ -8,12 +8,13 @@ import (
 // RunSpec is the full description of a "go test" invocation.
 // Same spec + same commit = same run.
 type RunSpec struct {
-	Package     string        // package directory (used as the working directory)
-	RunRegex    string        // "" -> all tests
-	Count       int           // always >= 1; 1 also breaks the test cache
-	Parallel    int           // -parallel; 0 -> leave alone
-	CPU         int           // -cpu; 0 -> leave alone
-	ShuffleSeed int64         // 0 -> -shuffle off
+	Package     string // package directory (used as the working directory)
+	RunRegex    string // "" -> all tests
+	Count       int    // always >= 1; 1 also breaks the test cache
+	Parallel    int    // -parallel; 0 -> leave alone
+	CPU         int    // -cpu; 0 -> leave alone
+	ShuffleSeed int64  // 0 -> -shuffle off
+	Short       bool
 	Race        bool          // -race
 	Env         []string      // "KEY=VALUE" layer; nil -> inherit
 	Tags        []string      // -tags; changes the set of compiled files

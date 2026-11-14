@@ -110,6 +110,8 @@ func replayCmd(ctx context.Context, args []string, out IO) error {
 		spec.RunRegex = domain.SelectionRegex(c.Witness)
 		spec.ShuffleSeed = c.Witness.Seed
 	}
+	spec.Short = c.Witness.Flags.Short
+	spec.Tags = c.Witness.Flags.Tags
 	runner := &gotest.Exec{}
 	outcome := func() (bool, error) {
 		if c.Witness.CrossClause {
@@ -324,6 +326,7 @@ func replayCross(ctx context.Context, c domain.Capsule, pkgArg string, n int, po
 			Package:  polluterDir,
 			RunRegex: "^(" + strings.Join(names, "|") + ")$",
 			Count:    1, Parallel: 1,
+			Short: c.Witness.Flags.Short, Tags: c.Witness.Flags.Tags,
 			Source: fmt.Sprintf("replay-cross/%d/1", i),
 		})
 		if err != nil {
@@ -339,6 +342,7 @@ func replayCross(ctx context.Context, c domain.Capsule, pkgArg string, n int, po
 			Package:  victimDir,
 			RunRegex: "^" + regexp.QuoteMeta(c.Witness.Victim.Name) + "$",
 			Count:    1, Parallel: 1,
+			Short: c.Witness.Flags.Short, Tags: c.Witness.Flags.Tags,
 			Race:   c.Witness.Flags.Race,
 			Source: fmt.Sprintf("replay-cross/%d/2", i),
 		})

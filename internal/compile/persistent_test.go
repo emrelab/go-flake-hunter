@@ -298,8 +298,8 @@ func TestCommandLineIsKindSpecific(t *testing.T) {
 		Target:  domain.Target{RelDir: "."},
 		Witness: domain.Witness{Victim: domain.TestID{Name: "T"}, Flags: domain.Flags{Count: 7}},
 	}
-	if got := compile.CommandLine(repeat); !strings.Contains(got, "-count=7") {
-		t.Errorf("the repeat command must contain -count=7: %s", got)
+	if got := compile.CommandLine(repeat); !strings.Contains(got, "-count=1") {
+		t.Errorf("the repeat command must run the body once: %s", got)
 	}
 
 	parallel := domain.Capsule{
@@ -386,5 +386,15 @@ func TestWriteRetainsLegacyVictimWithoutOverwritingSibling(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal("sibling lost", err)
+	}
+}
+
+func TestAuditC10_RepeatCommandRunsOneBody(t *testing.T) {
+	c := capsule()
+	c.Kind = domain.KindRepeat
+	c.Witness.Flags.Count = 7
+	got := compile.CommandLine(c)
+	if !strings.Contains(got, "-count=1") || strings.Contains(got, "-count=7") {
+		t.Fatalf("repeat body already runs seven times: %s", got)
 	}
 }

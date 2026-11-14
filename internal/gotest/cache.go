@@ -109,7 +109,7 @@ func cacheable(res *domain.RunResult) bool {
 func specKey(s domain.RunSpec) string {
 	key := s.Package + "\x00" + s.RunRegex + "\x00"
 	key += itoa(s.Count) + "\x00" + itoa(s.Parallel) + "\x00" + itoa(s.CPU) + "\x00"
-	key += itoa64(s.ShuffleSeed) + "\x00" + boolStr(s.Race)
+	key += itoa64(s.ShuffleSeed) + "\x00" + boolStr(s.Race) + boolStr(s.Short)
 	// Witness content is part of the key: same package + same -run means a
 	// different step set. Without this, the PASS of one ddmin subset was served
 	// to another, and the search eliminated the real polluter.

@@ -29,8 +29,10 @@ func (k Kind) Valid() bool {
 
 // Flags are the go test flags needed for reproduction.
 type Flags struct {
-	Parallel int  `json:"parallel,omitempty"`
-	Race     bool `json:"race,omitempty"`
+	Parallel int      `json:"parallel,omitempty"`
+	Race     bool     `json:"race,omitempty"`
+	Short    bool     `json:"short,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
 	// Count is the -count value a repeat witness was found with ("--repeat N").
 	// Without it a capsule found with -count=50 replays with the verification
 	// count (2), goes green, and the tool reports "flake fixed" — a false

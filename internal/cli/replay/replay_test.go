@@ -271,8 +271,8 @@ func TestFlakeWitness(t *testing.T) {}
 	if c.Witness.Func != want {
 		t.Errorf("capsule witness func = %q, want %q", c.Witness.Func, want)
 	}
-	if !strings.Contains(c.Repro.Command, "'^"+want+"$'") {
-		t.Errorf("reproduce command must name the colliding-free witness: %s", c.Repro.Command)
+	if !strings.HasPrefix(c.Repro.Command, "go-flake-hunter replay ") {
+		t.Errorf("reproduce command must reinstall the colliding-free witness: %s", c.Repro.Command)
 	}
 
 	code, out, errOut := clitest.Run("replay", "-capsule-dir", store, "--pkg", dir, "-n", "2")
@@ -405,5 +405,34 @@ func TestAuditS5_ReplayRejectsWrongModuleAndEnvKey(t *testing.T) {
 		if code != domain.ExitUsage || out != "" || !strings.Contains(stderr, tc.want) || strings.Contains(stderr, "audit-secret") {
 			t.Errorf("replay exit=%d stdout=%s stderr=%s", code, out, stderr)
 		}
+	}
+}
+
+func TestAuditC6_PrintedReplayRunsFromCleanCheckout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	dir := clitest.FixtureDir(t, "order-basic")
+	store := t.TempDir()
+	code, _, stderr := clitest.Run("hunt", dir, "--short", "--capsule-dir", store)
+	if code != 0 {
+		t.Fatal(stderr)
+	}
+	s := capsule.NewStore(store)
+	ids, err := s.List()
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("capsules: %v %v", ids, err)
+	}
+	c, err := s.Read(ids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := strings.Split(c.Repro.Command, "'")
+	if !c.Witness.Flags.Short || len(cmd) != 5 || cmd[0] != "go-flake-hunter replay " || cmd[1] != s.Path(c.ID) || cmd[3] != dir {
+		t.Fatalf("printed command cannot reinstall the witness: %s", c.Repro.Command)
+	}
+	code, out, stderr := clitest.Run("replay", cmd[1], "--pkg", cmd[3], "-n", "1")
+	if code != 0 || !strings.Contains(out, "1/1 reproduced") || !strings.Contains(c.Repro.Command, "-n 1") {
+		t.Fatalf("replay exit=%d %s %s", code, out, stderr)
 	}
 }

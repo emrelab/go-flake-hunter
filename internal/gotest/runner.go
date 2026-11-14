@@ -89,7 +89,7 @@ func (e *Exec) Run(ctx context.Context, spec domain.RunSpec) (*domain.RunResult,
 	if len(spec.Tags) > 0 {
 		args = append(args, "-tags", strings.Join(spec.Tags, ","))
 	}
-	if e.Short {
+	if e.Short || spec.Short {
 		args = append(args, "-short")
 	}
 	args = append(args, ".")
