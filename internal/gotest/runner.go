@@ -101,6 +101,11 @@ func (e *Exec) Run(ctx context.Context, spec domain.RunSpec) (*domain.RunResult,
 	cmd.Dir = spec.Package
 	cmd.Env = append(os.Environ(), spec.Env...)
 
+	// The stream is buffered whole before parsing. Measured (M4, 120 tests ×
+	// 20 output lines ≈ 375 KB): 6.8 ms and 4.5 MB of allocations per parse,
+	// so a 50-package scan stays in tens of MB — streaming buys nothing yet.
+	// shortcut: one package whose -json log passes ~50 MB would sit in memory
+	// twice; feed the scanner an io.Reader then.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
