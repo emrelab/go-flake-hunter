@@ -5,9 +5,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/emrelab/go-flake-hunter/internal/capsule"
@@ -38,8 +37,8 @@ func replayCmd(ctx context.Context, args []string, out IO) error {
 	fs.IntVar(&n, "n", 5, "how many times to run")
 	fs.StringVar(&envKV, "env", "", "KEY=VALUE for env flakes (the capsule does not store the value)")
 	fs.StringVar(&dir, "capsule-dir", "", "capsule directory (default .go-flake-hunter)")
-	fs.StringVar(&pkgArg, "pkg", "", "package directory (default: the directory the capsule recorded)")
-	fs.StringVar(&polluterArg, "polluter-pkg", "", "polluter package directory (cross-binary capsules; default: the capsule's polluterRelDir)")
+	fs.StringVar(&pkgArg, "pkg", "", "package directory (default: resolve the capsule package in this checkout)")
+	fs.StringVar(&polluterArg, "polluter-pkg", "", "polluter package directory (cross-binary capsules; default: resolve the polluter package in this checkout)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -57,17 +56,20 @@ func replayCmd(ctx context.Context, args []string, out IO) error {
 			"%s is a partial capsule (%s); no verified witness to re-run", c.ID, c.Status)
 	}
 	if c.Witness.CrossBinary {
-		return replayCross(ctx, c, pkgArg, storeDir, n, polluterArg, out)
+		return replayCross(ctx, c, pkgArg, n, polluterArg, out)
 	}
 	if n <= 0 {
 		return domain.Wrap(domain.ErrUsage, "-n must be positive")
 	}
 
-	pkgDir, f, err := replayTarget(pkgArg, c, storeDir)
+	pkgDir, f, err := replayTarget(ctx, pkgArg, c)
 	if err != nil {
 		return err
 	}
 	clause, err := harness.ResolveClause(f.Clause, c.Witness.Victim.Name, nil)
+	if c.Kind != domain.KindRepeat && c.Kind != domain.KindEnv && !c.Witness.CrossClause {
+		clause, err = compileClause(c, f)
+	}
 	if err != nil {
 		return err
 	}
@@ -87,10 +89,10 @@ func replayCmd(ctx context.Context, args []string, out IO) error {
 	case domain.KindEnv:
 		// The value is not in the capsule and never will be: the user provides it.
 		// Without it the run says "not reproduced" — correct, the info is missing.
-		if envKV == "" {
-			return domain.Wrap(domain.ErrUsage,
-				"this capsule is environment-dependent; it cannot be reproduced without --env %s=<value>",
-				strings.Join(c.Witness.EnvDiff, "=<value> --env "))
+		key, _, ok := strings.Cut(envKV, "=")
+		if !ok || !slices.Contains(c.Witness.EnvDiff, key) {
+			return domain.Wrap(domain.ErrUsage, "supply --env KEY=VALUE for a recorded key: %s",
+				strings.Join(c.Witness.EnvDiff, ", "))
 		}
 		spec.Env = []string{envKV}
 	case domain.KindRepeat:
@@ -259,39 +261,16 @@ func replayRepeatCount(c domain.Capsule) int {
 	return 10
 }
 
-// replayTarget finds the package the capsule is about.
-//
-// Target.RelDir is what the user typed when hunting, which is only meaningful
-// in the same directory layout. A capsule is meant to outlive that: it travels
-// in a PR comment, a CI artifact and a colleague's checkout. So the candidates
-// are tried in order and the first one that actually declares the victim wins —
-// and if none does, the tool says so instead of running something else.
-func replayTarget(pkgArg string, c domain.Capsule, storeDir string) (string, facts.PkgFacts, error) {
-	candidates := []string{pkgArg, c.Target.RelDir, filepath.Dir(storeDir), "."}
-	tried := make([]string, 0, len(candidates))
-	for _, cand := range candidates {
-		if cand == "" {
-			continue
-		}
-		abs, err := filepath.Abs(cand)
-		if err != nil {
-			continue
-		}
-		if st, statErr := os.Stat(abs); statErr != nil || !st.IsDir() {
-			continue
-		}
-		f, err := facts.Scan(abs)
-		if err != nil {
-			continue
-		}
-		if _, ok := f.Clause[c.Witness.Victim.Name]; ok {
-			return abs, f, nil
-		}
-		tried = append(tried, abs)
+func replayTarget(ctx context.Context, pkgArg string, c domain.Capsule) (string, facts.PkgFacts, error) {
+	dir, err := resolveTargetDir(ctx, c.Target.Package, pkgArg, ".")
+	if err != nil {
+		return "", facts.PkgFacts{}, err
 	}
-	return "", facts.PkgFacts{}, domain.Wrap(domain.ErrUsage,
-		"package containing test %s not found (tried: %s); specify it with --pkg",
-		c.Witness.Victim.Name, strings.Join(tried, ", "))
+	f, err := facts.Scan(dir)
+	if err != nil {
+		return "", facts.PkgFacts{}, err
+	}
+	return dir, f, nil
 }
 
 // replayCross replays a two-process witness (#6): stage 1 runs the shrunk
@@ -301,31 +280,33 @@ func replayTarget(pkgArg string, c domain.Capsule, storeDir string) (string, fac
 //
 // Every round re-runs both stages; results never come from the cache because
 // this runner is a bare Exec and each spec carries a round-stamped Source.
-func replayCross(ctx context.Context, c domain.Capsule, pkgArg, storeDir string, n int, polluterArg string, out IO) error {
+func replayCross(ctx context.Context, c domain.Capsule, pkgArg string, n int, polluterArg string, out IO) error {
 	if n <= 0 {
 		return domain.Wrap(domain.ErrUsage, "-n must be positive")
 	}
-	victimDir, _, err := replayTarget(pkgArg, c, storeDir)
+	victimDir, _, err := replayTarget(ctx, pkgArg, c)
 	if err != nil {
 		return err
 	}
-	polluterDir := polluterArg
-	if polluterDir == "" {
-		polluterDir = c.Target.PolluterRelDir
-	}
-	if polluterDir == "" {
-		return domain.Wrap(domain.ErrUsage,
-			"cross-binary capsule: pass the polluter package with --polluter-pkg")
-	}
-
+	var polluterPackage string
 	names := make([]string, 0, len(c.Witness.Steps))
 	for _, s := range c.Witness.Steps {
 		if strings.HasPrefix(s.Label, domain.StepLabelPolluter) {
+			if s.Package == "" || polluterPackage != "" && s.Package != polluterPackage {
+				return domain.Wrap(domain.ErrUsage, "cross-binary polluter steps must name one package")
+			}
+			polluterPackage = s.Package
 			names = append(names, regexp.QuoteMeta(s.Func()))
 		}
 	}
+
 	if len(names) == 0 {
 		return domain.Wrap(domain.ErrUsage, "cross-binary capsule carries no polluter steps")
+	}
+
+	polluterDir, err := resolveTargetDir(ctx, polluterPackage, polluterArg, ".")
+	if err != nil {
+		return fmt.Errorf("polluter: %w", err)
 	}
 
 	ctx, unlock, err := policy.LockedDirs(ctx, polluterDir, victimDir)
