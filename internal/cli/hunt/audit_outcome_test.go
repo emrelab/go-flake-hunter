@@ -83,3 +83,20 @@ func TestAuditC5_PartialIsInconclusiveOnEverySurface(t *testing.T) {
 		})
 	}
 }
+
+func TestAuditC9_LogsToStderrAndRejectsFormatBeforeRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	dir := clitest.FixtureDir(t, "repeat-accumulate")
+	store := t.TempDir()
+	code, out, stderr := clitest.Run("hunt", dir, "--format", "invalid", "--capsule-dir", store)
+	entries, err := os.ReadDir(store)
+	if code != 2 || len(entries) != 0 || err != nil || out != "" {
+		t.Errorf("invalid format exit=%d artifacts=%v err=%v stdout=%s stderr=%s", code, entries, err, out, stderr)
+	}
+	code, out, stderr = clitest.Run("hunt", dir, "--format", "json", "-v", "--capsule-dir", store)
+	if code != 0 || !json.Valid([]byte(out)) || !strings.Contains(stderr, "written:") {
+		t.Errorf("verbose JSON exit=%d stdout=%s stderr=%s", code, out, stderr)
+	}
+}

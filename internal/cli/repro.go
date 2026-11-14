@@ -32,6 +32,9 @@ func reproCmd(ctx context.Context, args []string, out IO) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
+	if err := validateRunFormat(o.format); err != nil {
+		return err
+	}
 	rest := fs.Args()
 
 	if err := o.resolvePolluter(ctx); err != nil {

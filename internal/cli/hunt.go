@@ -356,7 +356,7 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 			return err
 		}
 		if s.o.verbose {
-			_, _ = fmt.Fprintf(s.out.Stdout, "\n  written: %s\n", path)
+			_, _ = fmt.Fprintf(s.out.Stderr, "\n  written: %s\n", path)
 		}
 	}
 	return nil
@@ -392,6 +392,15 @@ func writeCapsule(out IO, format string, c domain.Capsule) error {
 		return report.Text(out.Stdout, c)
 	default:
 		return domain.Wrap(domain.ErrUsage, "unknown format %q (text|json|markdown|sarif — sarif is a run format, see hunt)", format)
+	}
+}
+
+func validateRunFormat(format string) error {
+	switch format {
+	case "", "text", "json", "markdown", "md", "sarif":
+		return nil
+	default:
+		return domain.Wrap(domain.ErrUsage, "unknown format %q (text|json|markdown|sarif)", format)
 	}
 }
 
@@ -436,6 +445,9 @@ func hunt(ctx context.Context, args []string, out IO) error {
 	fs.BoolVar(&writeBaseline, "write-baseline", false,
 		"write the ids found by this run to the baseline file (default .go-flake-hunter/baseline.json)")
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if err := validateRunFormat(o.format); err != nil {
 		return err
 	}
 	if jobs < 1 {
