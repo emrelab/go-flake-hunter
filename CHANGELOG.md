@@ -22,6 +22,11 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   Generated capsules and temporary witnesses are excluded from dirty provenance.
 - Scaffold gates fail on partial reproduction. CI uploads visible capsules,
   and release builds test the tagged SHA before producing attestations and SBOMs.
+- A clean scan prints one summary block (tests, packages, runs, duration, one
+  line per probe) instead of six lines per test; `-v` restores the per-test
+  `tried:` list. Printed commands use double quotes, so they run in cmd and
+  PowerShell as well as sh. Windows takes the cross-process directory lock
+  through `LockFileEx` instead of the previous no-op.
 
 ### Fixed
 - The release page is the annotated tag message again. `release.yml` published

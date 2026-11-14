@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -122,6 +123,14 @@ type scanner struct {
 	results   []domain.PackageResult
 	broken    bool
 	cwd       string
+	// scanned counts the tests this run examined; the clean-scan summary is
+	// one line per probe, so the count has to come from here, not from the
+	// per-test blocks that no longer print (B13).
+	scanned int
+	started time.Time
+	// tallies aggregate each probe's verdicts across tests for that summary.
+	tallies    map[string]*probeTally
+	tallyOrder []string
 	// gitState memoizes the repo provenance per package directory: every
 	// capsule a package yields shares it, and asking git again per capsule
 	// doubled the subprocess count for no new information.
@@ -145,7 +154,70 @@ func newScanner(out IO, o huntOptions, only string) *scanner {
 		PolluterDir: o.polluterDir,
 	})
 	cwd, _ := os.Getwd()
-	return &scanner{o: o, out: out, registry: registry, runner: runner, budget: budget, only: only, cwd: cwd}
+	return &scanner{o: o, out: out, registry: registry, runner: runner, budget: budget, only: only, cwd: cwd, started: time.Now()}
+}
+
+// probeTally is one probe's verdicts across every test in the scan.
+type probeTally struct {
+	tried     int // ran, produced no evidence
+	explained int // ran, found the witness
+	skipped   int // ruled out statically, no build spent
+}
+
+func (s *scanner) tallyFor(name string) *probeTally {
+	t := s.tallies[name]
+	if t == nil {
+		t = &probeTally{}
+		if s.tallies == nil {
+			s.tallies = map[string]*probeTally{}
+		}
+		s.tallies[name] = t
+		s.tallyOrder = append(s.tallyOrder, name)
+	}
+	return t
+}
+
+func (s *scanner) noteAttempts(res *probe.Result) {
+	if res == nil {
+		return
+	}
+	for _, a := range res.Tried {
+		t := s.tallyFor(a.Probe)
+		switch {
+		case a.Skipped:
+			t.skipped++
+		case a.Err == nil:
+			t.explained++
+		default:
+			t.tried++
+		}
+	}
+}
+
+// writeCleanSummary answers "did it look, and where" in one block regardless of
+// test count: a clean 100-test package used to print six lines per test, which
+// buried the verdict. Per-test detail stays behind -v.
+func (s *scanner) writeCleanSummary(w io.Writer, packages int) {
+	noun := "packages"
+	if packages == 1 {
+		noun = "package"
+	}
+	_, _ = fmt.Fprintf(w, "flake not found: %d tests in %d %s, %d/%d runs, %s\n",
+		s.scanned, packages, noun, s.budget.Runs(), s.budget.MaxRuns,
+		time.Since(s.started).Round(time.Millisecond))
+	for _, name := range s.tallyOrder {
+		t := s.tallies[name]
+		_, _ = fmt.Fprintf(w, "  %-9s ", name)
+		if t.tried+t.explained == 0 {
+			_, _ = fmt.Fprintf(w, "not applicable %d\n", t.skipped)
+			continue
+		}
+		_, _ = fmt.Fprintf(w, "tried %d, explained %d", t.tried+t.explained, t.explained)
+		if t.skipped > 0 {
+			_, _ = fmt.Fprintf(w, ", not applicable %d", t.skipped)
+		}
+		_, _ = fmt.Fprintln(w)
+	}
 }
 
 // emit renders or collects one capsule.
@@ -275,7 +347,9 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 		_, _ = fmt.Fprintf(s.out.Stderr, "%s: external dependencies (static, package-wide): %s; clock/network/database control is outside go-flake-hunter; reproduction probes still run\n", pkgArg, strings.Join(pkgFacts.ExternalDependencies, "; "))
 	}
 	for _, t := range tests {
+		s.scanned++
 		res, err := s.registry.Run(ctx, probe.Target{Test: t, Dir: dir, Facts: pkgFacts}, s.runner)
+		s.noteAttempts(res)
 		switch {
 		case errors.Is(err, domain.ErrBrokenTest):
 			s.broken = true
@@ -297,8 +371,12 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 		case errors.Is(err, probe.ErrNotReproduced):
 			// Always write: "no flake" alone hides the difference between
 			// "nothing is wrong" and "this probe cannot see this class".
-			// The user must see what was tried.
-			writeNoFlake(s.out, s.o, t, res)
+			// The user must see what was tried. A full scan aggregates the
+			// same fact into one block at the end (B13); a single asked-about
+			// test (repro, --only) keeps its own detail.
+			if s.o.verbose || s.only != "" {
+				writeNoFlake(s.out, s.o, t, res)
+			}
 			continue
 		case stopped(ctx, err):
 			// Budget/cancel: not finding the thing is not an answer, it is an
@@ -542,6 +620,11 @@ func hunt(ctx context.Context, args []string, out IO) error {
 	if len(s.baseline.IDs) > 0 {
 		_, _ = fmt.Fprintf(out.Stderr, "baseline: %d known, %d new\n",
 			s.found-s.fresh, s.fresh)
+	}
+	// A clean scan is a verdict, not N test-by-test reports: one block, then
+	// exit. -v keeps the per-test detail for "what did it actually try".
+	if (o.format == "" || o.format == "text") && !o.verbose && s.found == 0 && !s.broken {
+		s.writeCleanSummary(out.Stdout, len(dirs))
 	}
 	return s.outcome(false)
 }

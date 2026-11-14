@@ -9,7 +9,7 @@
 
 > Reproduce the flake in 30 seconds instead of 30 minutes — and leave a permanent regression test in the repo.
 
-239 tests + 2 fuzz targets · CI on linux/macos/windows + a nightly sweep · zero dependencies ·
+242 tests + 2 fuzz targets · CI on linux/macos/windows + a nightly sweep · zero dependencies ·
 three real upstream flake cases reduced to witnesses ([evidence](docs/real-world/README.md))
 
 Finds flaky Go-test failures caused by **order, parallelism, repetition and
@@ -104,7 +104,7 @@ flake found: TestVictim
   evidence     : TestPolluter writes, TestVictim reads: seeded
 
   reproduce:
-    go-flake-hunter replay '.go-flake-hunter/gfh_e3c71933f905.json' --pkg '.' -n 1
+    go-flake-hunter replay ".go-flake-hunter/gfh_e3c71933f905.json" --pkg '.' -n 1
 
   capsule      : gfh_e3c71933f905
   status       : confirmed

@@ -802,7 +802,7 @@ No panic when the budget is exceeded: a `status: partial` capsule is written and
 
 | Condition | Exit | Message (to the user) |
 |---|---|---|
-| `hunt`: no witness (clean scan) | `0` | `"flake not found."` + `tried:` hypothesis list |
+| `hunt`: no witness (clean scan) | `0` | one block: `flake not found: N tests in M packages, runs, duration` + per-probe tally (`-v` keeps the per-test `tried:` list) |
 | `hunt`/`repro`: witness found, no `--fail-on-flake` | `0` | report + capsule; the gate stays open |
 | `ErrFlakeFound` (`--fail-on-flake`, outside baseline) | `1` | "flake found" |
 | `ErrUsage` | `2` | "usage: go-flake-hunter repro <package-dir> [TestName]" |

@@ -79,6 +79,14 @@ func (s *scanner) packages(ctx context.Context, dirs []string, jobs int) error {
 		s.collected = append(s.collected, r.child.collected...)
 		s.results = append(s.results, r.child.results...)
 		s.broken = s.broken || r.child.broken
+		s.scanned += r.child.scanned
+		for _, name := range r.child.tallyOrder {
+			dst := s.tallyFor(name)
+			c := r.child.tallies[name]
+			dst.tried += c.tried
+			dst.explained += c.explained
+			dst.skipped += c.skipped
+		}
 		if r.err != nil && first == nil {
 			first = r.err
 		}

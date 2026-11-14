@@ -84,6 +84,20 @@ func TestHuntCleanExitsZero(t *testing.T) {
 			t.Errorf("probe %s not reported: %s", p, out.String())
 		}
 	}
+	// B13: a clean scan is one summary block, not six lines per test. The
+	// fixture has two tests; the old shape printed twelve lines.
+	if lines := strings.Count(strings.TrimSpace(out.String()), "\n") + 1; lines > 8 {
+		t.Errorf("clean scan printed %d lines, want a summary block:\n%s", lines, out.String())
+	}
+	// -v keeps the per-test detail: one "flake not found" per test.
+	out.Reset()
+	errOut.Reset()
+	code = cli.Execute(context.Background(),
+		[]string{"hunt", dir, "-v", "-capsule-dir", t.TempDir()},
+		cli.IO{Stdout: &out, Stderr: &errOut})
+	if code != domain.ExitOK || strings.Count(out.String(), "flake not found") != 2 {
+		t.Errorf("-v lost the per-test explanation (code %d):\n%s", code, out.String())
+	}
 }
 
 // When the budget runs out: exit 4, a partial capsule is written, no witness

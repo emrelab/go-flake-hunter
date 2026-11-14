@@ -79,7 +79,7 @@ if [ ! -s "$tmp/actual" ] || [ ! -s "$tmp/doc" ]; then
   err "could not extract the sample output (doc block or fixture run empty)"
 else
   norm() {
-    sed "s|$fixture/||g; s|--pkg '$fixture'|--pkg '.'|g" "$1" | sed -E \
+    sed "s|$fixture/||g; s|--pkg \"$fixture\"|--pkg '.'|g" "$1" | sed -E \
       -e 's/gfh_[0-9a-f]{12}/gfh_ID/g' \
       -e 's/^[[:space:]]+//' -e 's/[[:space:]]+: /: /' \
       -e 's/^run: .*/run: N\/N/' \
