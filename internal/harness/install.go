@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 type Harness struct {
 	path   string
 	digest string
+	file   fs.FileInfo
 	once   sync.Once
 	err    error
 }
@@ -63,27 +65,41 @@ func install(pkgDir, side string, build func() ([]byte, error)) (*Harness, error
 		return nil, err
 	}
 
-	h := &Harness{
-		path:   filepath.Join(pkgDir, domain.WitnessFileName(side)),
-		digest: fmt.Sprintf("%x", sha256.Sum256(src))[:16],
+	name := domain.WitnessFileName(side)
+	if !filepath.IsLocal(name) || filepath.Base(name) != name {
+		return nil, domain.Wrap(domain.ErrUsage, "invalid witness file name %q", name)
 	}
-	if err := os.WriteFile(h.path, src, 0o644); err != nil {
+	h := &Harness{path: filepath.Join(pkgDir, name), digest: witnessDigest(src)}
+	f, err := os.OpenFile(h.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
 		return nil, fmt.Errorf("%w: cannot write witness: %v", domain.ErrInternal, err)
+	}
+	h.file, err = f.Stat()
+	if err == nil {
+		_, err = f.Write(append([]byte(witnessMarker+h.digest+"\n"), src...))
+	}
+	if err = errors.Join(err, f.Close()); err != nil {
+		_, removeErr := removeWitness(h.path, h.file)
+		return nil, fmt.Errorf("%w: cannot write witness: %v", domain.ErrInternal, errors.Join(err, removeErr))
 	}
 	return h, nil
 }
 
+const witnessMarker = "// go-flake-hunter temporary witness checksum: "
+
+func witnessDigest(src []byte) string { return fmt.Sprintf("%x", sha256.Sum256(src))[:16] }
+
 // Path is the file written by Install.
 func (h *Harness) Path() string { return h.path }
 
-// Remove deletes the witness file. Missing file is not an error: cleanupStale
-// and the deferred Remove may race, and both must stay idempotent.
+// Remove deletes the installed witness if it still has the same ownership and content.
 func (h *Harness) Remove() error {
 	h.once.Do(func() {
-		if h.path == "" {
-			return
-		}
-		if err := os.Remove(h.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if h.file != nil {
+			info, err := ownedWitness(h.path)
+			if err == nil && info != nil && os.SameFile(info, h.file) {
+				_, err = removeWitness(h.path, info)
+			}
 			h.err = err
 		}
 	})
@@ -92,9 +108,7 @@ func (h *Harness) Remove() error {
 
 // CleanupStale deletes witness files left behind by a killed run.
 //
-// Called once at start-up: a crashed process cannot run its deferred Remove,
-// and a stray witness file would make every later `go build` in that package
-// fail with someone else's test errors.
+// The caller holds the package lock so it cannot remove an active witness.
 func CleanupStale(pkgDir string) ([]string, error) {
 	entries, err := os.ReadDir(pkgDir)
 	if err != nil {
@@ -102,16 +116,63 @@ func CleanupStale(pkgDir string) ([]string, error) {
 	}
 	var removed []string
 	for _, e := range entries {
-		if e.IsDir() || !domain.IsWitnessFileName(e.Name()) {
+		if !e.Type().IsRegular() || !domain.IsWitnessFileName(e.Name()) {
 			continue
 		}
 		p := filepath.Join(pkgDir, e.Name())
-		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		info, err := ownedWitness(p)
+		if err != nil {
 			return removed, err
 		}
-		removed = append(removed, p)
+		deleted, err := removeWitness(p, info)
+		if err != nil {
+			return removed, err
+		}
+		if deleted {
+			removed = append(removed, p)
+		}
 	}
 	return removed, nil
+}
+
+func ownedWitness(path string) (fs.FileInfo, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, err
+	}
+	src, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	header, body, ok := bytes.Cut(src, []byte("\n"))
+	if !ok || string(header) != witnessMarker+witnessDigest(body) {
+		return nil, nil
+	}
+	return info, nil
+}
+
+func removeWitness(path string, expected fs.FileInfo) (bool, error) {
+	if expected == nil {
+		return false, nil
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil || !os.SameFile(expected, info) {
+		return false, err
+	}
+	err = os.Remove(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // ResolveClause decides the package clause for a witness that calls the given

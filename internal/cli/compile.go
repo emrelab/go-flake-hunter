@@ -4,6 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,11 +81,16 @@ func compileCmd(ctx context.Context, args []string, out IO) error {
 	if err != nil {
 		return domain.Wrap(domain.ErrUsage, "could not read %s", pkgDir)
 	}
-	clause, err := harness.ResolveClause(f.Clause, c.Witness.Victim.Name, nil)
+	clause, err := compileClause(c, f)
 	if err != nil {
 		return err
 	}
 
+	if dryRun && !print {
+		if _, err := compile.Render(c, clause); err != nil {
+			return err
+		}
+	}
 	if print {
 		src, err := compile.Render(c, clause)
 		if err != nil {
@@ -138,6 +146,75 @@ func compileCmd(ctx context.Context, args []string, out IO) error {
 	return nil
 }
 
+func compileClause(c domain.Capsule, f facts.PkgFacts) (string, error) {
+	victim := c.Witness.Victim
+	var polluters []string
+	for _, step := range c.Witness.Steps {
+		if (step.Func() == victim.Name) != strings.HasPrefix(step.Label, domain.StepLabelVictim) {
+			return "", domain.Wrap(domain.ErrUnsupportedTest, "witness step %q does not match the victim %s", step.Label, victim.Name)
+		}
+		if step.Package != "" && step.Package != victim.Package {
+			return "", domain.Wrap(domain.ErrUnsupportedTest, "witness step %q names a different package: %s", step.Label, step.Package)
+		}
+		if step.Func() != victim.Name {
+			polluters = append(polluters, step.Func())
+		}
+	}
+	clause, err := harness.ResolveClause(f.Clause, victim.Name, polluters)
+	if err != nil {
+		return "", err
+	}
+	files := map[string]*ast.File{}
+	for _, name := range append(polluters, victim.Name) {
+		path := f.TestPos[name].File
+		file := files[path]
+		if file == nil {
+			file, err = parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+			if err != nil {
+				return "", domain.Wrap(domain.ErrUnsupportedTest, "cannot read test declaration %q: %v", name, err)
+			}
+			files[path] = file
+		}
+		if file.Name.Name != clause || !declaresTest(file, name) {
+			return "", domain.Wrap(domain.ErrUnsupportedTest, "%q is not a Go test function in package %s", name, clause)
+		}
+	}
+	return clause, nil
+}
+
+func declaresTest(file *ast.File, name string) bool {
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != name || fn.Recv != nil {
+			continue
+		}
+		t := fn.Type
+		if t.TypeParams != nil || t.Results != nil && len(t.Results.List) != 0 ||
+			len(t.Params.List) != 1 || len(t.Params.List[0].Names) > 1 {
+			return false
+		}
+		ptr, ok := t.Params.List[0].Type.(*ast.StarExpr)
+		if !ok {
+			return false
+		}
+		switch typ := ptr.X.(type) {
+		case *ast.Ident:
+			return typ.Name == "T"
+		case *ast.SelectorExpr:
+			pkg, ok := typ.X.(*ast.Ident)
+			if !ok || typ.Sel.Name != "T" {
+				return false
+			}
+			for _, imp := range file.Imports {
+				if imp.Path.Value == `"testing"` || imp.Path.Value == "`testing`" {
+					return imp.Name == nil && pkg.Name == "testing" || imp.Name != nil && pkg.Name == imp.Name.Name
+				}
+			}
+		}
+	}
+	return false
+}
+
 // verifyCompiled runs the artifact once, exactly as the user would, and returns
 // the reproduction contract's verdict (#8):
 //
@@ -156,26 +233,41 @@ func verifyCompiled(ctx context.Context, r gotest.Runner, dir string, c domain.C
 		return "", err
 	}
 	fn := domain.PersistentFuncName(c.Witness.Victim.Name)
+	parent, hasParent := res.Outcomes[fn]
 
 	switch {
 	case res.BuildFailed:
 		return "", domain.Wrap(domain.ErrBuildFailed, "the generated regression test did not compile: %s",
 			firstBuildLine(res.BuildOutput))
-	case res.Failed(fn):
-		_, _ = fmt.Fprintln(out.Stdout, "verification     : RED (verified — the flake is still there)")
-		return domain.VerifyVerified, nil
-	case res.Status(fn) == domain.StatusSkip:
+	case res.TimedOut || !hasParent || res.ExitCode < 0:
+		return "", domain.Wrap(domain.ErrNotReproducible, "verification did not complete")
+	case c.Kind == domain.KindEnv && parent.Status == domain.StatusSkip && res.ExitCode == 0 &&
+		strings.Contains(parent.Output, "this regression does not run without the env variable set:"):
 		// The env class has no value in the capsule; an unset variable makes the
 		// test inert. Inert is not verified — name the missing keys and exit 3.
 		keys := strings.Join(c.Witness.EnvDiff, ", ")
 		_, _ = fmt.Fprintf(out.Stdout, "verification     : unverified (env variable missing: %s)\n", keys)
 		return domain.VerifySkippedMissingEnv, domain.Wrap(domain.ErrNotReproducible,
 			"the generated test SKIPPED instead of running: %s is not set — run again with the variable set", keys)
-	default:
-		_, _ = fmt.Fprintln(out.Stdout, "verification     : GREEN (not reproduced)")
-		return domain.VerifyGreenNotReproduced, domain.Wrap(domain.ErrNotReproducible,
-			"the generated test stayed green: for class %s the artifact does not reproduce the flake", c.Kind)
 	}
+
+	victimFailed := false
+	for name := range compile.VerifyTests(c) {
+		if _, ok := res.Outcomes[name]; !ok {
+			return "", domain.Wrap(domain.ErrNotReproducible, "verification did not finish victim subtest %s", name)
+		}
+		victimFailed = victimFailed || res.Failed(name)
+	}
+	if parent.Status == domain.StatusFail && res.ExitCode == 1 && victimFailed {
+		_, _ = fmt.Fprintln(out.Stdout, "verification     : RED (verified — the flake is still there)")
+		return domain.VerifyVerified, nil
+	}
+	if victimFailed {
+		return "", domain.Wrap(domain.ErrNotReproducible, "victim failure did not match the regression test and process outcomes")
+	}
+	_, _ = fmt.Fprintln(out.Stdout, "verification     : victim did not fail (not reproduced)")
+	return domain.VerifyGreenNotReproduced, domain.Wrap(domain.ErrNotReproducible,
+		"the victim did not fail: for class %s the artifact does not reproduce the flake", c.Kind)
 }
 
 // firstBuildLine keeps a compiler diagnostic on one line.

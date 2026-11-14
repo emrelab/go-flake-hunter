@@ -22,7 +22,8 @@ func FuzzStoreRead(f *testing.F) {
 	// A real store-shaped capsule, marshalled exactly like Store.Write does.
 	full := domain.Capsule{
 		Schema:    domain.SchemaVersion,
-		ID:        "seed0001",
+		ID:        "gfh_fuzz",
+		Kind:      domain.KindRepeat,
 		CreatedAt: time.Date(2026, 11, 2, 1, 0, 0, 0, time.UTC),
 		Repo:      domain.Repo{Module: "example.com/app", Commit: "abc1234"},
 		Target:    domain.Target{Package: "example.com/app/internal/x", Victim: "TestFlake"},
@@ -38,8 +39,8 @@ func FuzzStoreRead(f *testing.F) {
 		f.Add(data[:len(data)/2])
 	}
 	seeds := []string{
-		`{"schema":"flakesmith/v1","id":"x"}`,      // pre-rename, still readable
-		`{"schema":"go-flake-hunter/v3","id":"x"}`, // foreign version must be rejected
+		`{"schema":"flakesmith/v1","id":"gfh_fuzz","kind":"repeat"}`, // pre-rename, still readable
+		`{"schema":"go-flake-hunter/v3","id":"gfh_fuzz"}`,            // foreign version must be rejected
 		"{",
 		"null",
 		"[]",
@@ -55,10 +56,10 @@ func FuzzStoreRead(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		dir := t.TempDir()
 		store := capsule.NewStore(dir)
-		if err := os.WriteFile(store.Path("fuzz"), data, 0o644); err != nil {
+		if err := os.WriteFile(store.Path("gfh_fuzz"), data, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		c, err := store.Read("fuzz")
+		c, err := store.Read("gfh_fuzz")
 		if err != nil {
 			return // corrupt input rejected as data — that is the contract
 		}
@@ -70,8 +71,8 @@ func FuzzStoreRead(f *testing.F) {
 		if err != nil {
 			t.Fatalf("List on a corrupt store: %v", err)
 		}
-		if len(ids) != 1 || ids[0] != "fuzz" {
-			t.Errorf("List = %v, want [fuzz]", ids)
+		if len(ids) != 1 || ids[0] != "gfh_fuzz" {
+			t.Errorf("List = %v, want [gfh_fuzz]", ids)
 		}
 	})
 }

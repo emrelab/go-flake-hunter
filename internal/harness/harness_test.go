@@ -200,11 +200,18 @@ func TestRemoveIsIdempotent(t *testing.T) {
 
 func TestCleanupStale(t *testing.T) {
 	dir := t.TempDir()
-	stale := filepath.Join(dir, domain.WitnessFileName("old"))
-	mine := filepath.Join(dir, "checkout_test.go")
-	if err := os.WriteFile(stale, []byte("package p"), 0o644); err != nil {
+	_, unlock, err := policy.Locked(context.Background(), dir)
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer unlock()
+	h, err := harness.Install(dir, "p", domain.WitnessFuncName,
+		[]domain.Step{{Label: domain.VictimLabel("TestVictim")}}, "old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := h.Path() // A killed run leaves the file without calling Remove.
+	mine := filepath.Join(dir, "checkout_test.go")
 	if err := os.WriteFile(mine, []byte("package p"), 0o644); err != nil {
 		t.Fatal(err)
 	}

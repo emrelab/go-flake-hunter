@@ -1,8 +1,11 @@
 package domain
 
 import (
+	"go/token"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Kind is the flake class: the output of the four probes in docs/ARCHITECTURE.md §7.
@@ -69,6 +72,41 @@ func (s Step) Func() string {
 		return s.Label[i+1:]
 	}
 	return s.Label
+}
+
+// ValidTestName checks the spelling of a top-level Go test function.
+func ValidTestName(name string) bool {
+	suffix, ok := strings.CutPrefix(name, "Test")
+	first, _ := utf8.DecodeRuneInString(suffix)
+	return ok && name != "TestMain" && token.IsIdentifier(name) && !unicode.IsLower(first)
+}
+
+// ValidLabel requires the label and the function call to name the same test.
+func (s Step) ValidLabel() bool {
+	name := s.Func()
+	return ValidTestName(name) && (s.Label == PolluterLabel(name) || s.Label == VictimLabel(name))
+}
+
+// ValidateTestNames checks the names from a witness before they reach Go source
+// or a test selector.
+func (w Witness) ValidateTestNames() error {
+	if !ValidTestName(w.Victim.Name) {
+		return Wrap(ErrUnsupportedTest, "invalid witness victim %q", w.Victim.Name)
+	}
+	if w.Func != "" && !ValidTestName(w.Func) {
+		return Wrap(ErrUnsupportedTest, "invalid witness function %q", w.Func)
+	}
+	for _, p := range w.Polluters {
+		if !ValidTestName(p.Name) {
+			return Wrap(ErrUnsupportedTest, "invalid witness polluter %q", p.Name)
+		}
+	}
+	for _, step := range w.Steps {
+		if !step.ValidLabel() {
+			return Wrap(ErrUnsupportedTest, "invalid witness step %q", step.Label)
+		}
+	}
+	return nil
 }
 
 // Witness is the minimal witness found: the smallest set of preceding tests that makes the victim fail.
