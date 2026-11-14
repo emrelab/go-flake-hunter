@@ -365,7 +365,11 @@ turns CI red on day one gets removed on day two.
 - **Noise-free:** the witness file gets a `zz_` prefix (Go skips `_`/`.`
   prefixed files) and is deleted after the run; `compile` output is build-tagged.
 - **Budgeted:** every run counts, cancellation works; an interrupted run is
-  never read as "passed".
+  never read as "passed". `--timeout` is a wall-clock budget checked **between**
+  runs: the check never cuts a test in half, so one in-flight run may overshoot
+  by up to its own 2-minute test timeout. A hard ceiling would have to kill a
+  running test, and a killed test reads as "passed" — wrong in the one direction
+  this tool cannot afford.
 - **Leak-proof:** the env key is stored, the value is not.
 
 Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

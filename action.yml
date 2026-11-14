@@ -22,7 +22,7 @@ inputs:
     required: false
     default: "200"
   timeout:
-    description: Total time budget (Go duration)
+    description: Total time budget (Go duration), checked between runs
     required: false
     default: 10m
   format:

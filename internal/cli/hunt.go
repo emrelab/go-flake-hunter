@@ -54,7 +54,7 @@ func (o *huntOptions) addFlags(fs *flag.FlagSet) {
 	fs.IntVar(&o.repeat, "repeat", probe.DefaultRepeatCount, "repeat count for -count")
 	fs.StringVar(&o.dir, "capsule-dir", "", "capsule directory (default <pkg>/.go-flake-hunter)")
 	fs.IntVar(&o.seeds, "seeds", 0, "shuffle seed count (0 = default 12)")
-	fs.DurationVar(&o.timeout, "timeout", policy.DefaultMaxWall, "total time budget (0 = default 5m)")
+	fs.DurationVar(&o.timeout, "timeout", policy.DefaultMaxWall, "total time budget, checked between runs (0 = default 5m; one in-flight run may overshoot by its own 2m test timeout)")
 	fs.IntVar(&o.budget, "budget", policy.DefaultMaxRuns, "total go test run budget (0 = default 1000)")
 	fs.BoolVar(&o.verbose, "v", false, "report every probe in detail")
 	fs.BoolVar(&o.failOnFlake, "fail-on-flake", false, "exit 1 if a flake is found (CI gate)")
