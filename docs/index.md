@@ -8,7 +8,7 @@ Reproduce a flaky Go test in 30 seconds instead of 30 minutes, shrink it to the
 smallest polluter→victim witness, and leave a permanent regression test behind.
 
 ```sh
-go install github.com/emrelab/go-flake-hunter/cmd/go-flake-hunter@v0.3.0
+go install github.com/emrelab/go-flake-hunter/cmd/go-flake-hunter@v0.4.0
 ```
 
 | Where to go | What is there |
