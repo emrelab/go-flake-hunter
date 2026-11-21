@@ -165,10 +165,39 @@ jobs:
           name: smoke-capsule-${{ github.run_attempt }}
           path: ${{ runner.temp }}/smoke-capsules/gfh_*.json
           if-no-files-found: error
-      - uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ steps.upload-smoke-capsule.outputs.artifact-id }}
-          path: ${{ runner.temp }}/smoke-downloaded
+      - name: download smoke capsule with retry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload-smoke-capsule.outputs.artifact-id }}
+        run: |
+          set -euo pipefail
+          # Bounded retry for GitHub Actions artifact visibility lag.
+          # The artifact upload succeeds but internal indexing may not
+          # immediately make it available via artifact-ids lookup.
+          # Retry with increasing backoff using GitHub REST API.
+          # Delays: 5, 15, 30, 60 seconds (max 4 attempts).
+          attempts=0
+          max_attempts=4
+          delays=(5 15 30 60)
+          mkdir -p "$RUNNER_TEMP/smoke-downloaded"
+          while [ $attempts -lt $max_attempts ]; do
+            if gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip" \
+              > "$RUNNER_TEMP/smoke-downloaded/artifact.zip" 2>&1; then
+              unzip -q -o "$RUNNER_TEMP/smoke-downloaded/artifact.zip" -d "$RUNNER_TEMP/smoke-downloaded"
+              rm "$RUNNER_TEMP/smoke-downloaded/artifact.zip"
+              echo "Artifact downloaded successfully on attempt $((attempts + 1))"
+              break
+            fi
+            attempts=$((attempts + 1))
+            if [ $attempts -eq $max_attempts ]; then
+              echo "All $max_attempts download attempts failed" >&2
+              exit 1
+            fi
+            echo "Attempt $attempts failed, waiting ${delays[$attempts - 1]}s before retry..." >&2
+            sleep "${delays[$attempts - 1]}"
+          done
       - name: verify capsule round trip
         run: |
           set -euo pipefail
