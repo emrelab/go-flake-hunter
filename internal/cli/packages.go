@@ -79,9 +79,10 @@ func (s *scanner) packages(ctx context.Context, dirs []string, jobs int) error {
 				next++
 				mu.Unlock()
 				r := &results[i]
-				child := &scanner{o: s.o, out: IO{Stdout: &r.stdout, Stderr: diagnostics, Debug: s.out.Debug}, registry: s.registry, runner: s.runner, budget: s.budget, only: s.only, baseline: s.baseline, cwd: s.cwd}
+				child := &scanner{o: s.o, out: IO{Stdout: &r.stdout, Stderr: diagnostics, Debug: s.out.Debug}, registry: s.registry, runner: s.runner, budget: s.budget, only: s.only, baseline: s.baseline, cwd: s.cwd, progress: s.progress}
 				r.child = child
 				r.err = child.pkg(ctx, unique[i])
+				s.progress.finish(child.relDir(unique[i]), r.err)
 				if r.err != nil && !packageScoped(r.err) {
 					mu.Lock()
 					halt = true
@@ -101,6 +102,8 @@ func (s *scanner) packages(ctx context.Context, dirs []string, jobs int) error {
 			first = err
 		}
 		s.found += r.child.found
+		s.suspected += r.child.suspected
+		s.brokenCount += r.child.brokenCount
 		s.fresh += r.child.fresh
 		s.ids = append(s.ids, r.child.ids...)
 		s.collected = append(s.collected, r.child.collected...)

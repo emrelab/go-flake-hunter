@@ -3,6 +3,7 @@ package gotest
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strconv"
@@ -112,12 +113,12 @@ func (e *Exec) Run(ctx context.Context, spec domain.RunSpec) (*domain.RunResult,
 	runCtx, cancel := context.WithTimeout(ctx, spec.Timeout+ctxSlack)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, e.goBin(), args...)
+	cmd := commandContext(runCtx, e.goBin(), args...)
 	cmd.Dir = spec.Package
 	cmd.Env = append(os.Environ(), spec.Env...)
 
 	// The stream is buffered whole before parsing. Measured (M4, 120 tests ×
-	// 20 output lines ≈ 375 KB): 6.8 ms and 4.5 MB of allocations per parse,
+	// 20 output lines ≈ 375 KB): 5.5 ms and 1.1 MB of allocations per parse,
 	// so a 50-package scan stays in tens of MB — streaming buys nothing yet.
 	// shortcut: one package whose -json log passes ~50 MB would sit in memory
 	// twice; feed the scanner an io.Reader then.
@@ -134,6 +135,9 @@ func (e *Exec) Run(ctx context.Context, spec domain.RunSpec) (*domain.RunResult,
 	// (runCtx's own timeout never enters here; Go's -timeout fires first.)
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if errors.Is(runErr, exec.ErrWaitDelay) {
+		return nil, domain.Wrap(domain.ErrIncomplete, "%s left output pipes open after exit", spec.Package)
 	}
 
 	// A failing test exits non-zero. That is the normal path, not an error.

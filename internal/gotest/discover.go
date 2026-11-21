@@ -3,7 +3,6 @@ package gotest
 import (
 	"bytes"
 	"context"
-	"os/exec"
 	"strings"
 
 	"github.com/emrelab/go-flake-hunter/internal/domain"
@@ -26,7 +25,7 @@ func (e *Exec) Discover(ctx context.Context, pkgDir string) ([]domain.TestID, er
 	}
 	defer release()
 
-	cmd := exec.CommandContext(ctx, e.goBin(), "test", "-list", ".*", ".")
+	cmd := commandContext(ctx, e.goBin(), "test", "-list", ".*", ".")
 	cmd.Dir = pkgDir
 
 	var stdout, stderr bytes.Buffer
@@ -70,7 +69,7 @@ func (e *Exec) Discover(ctx context.Context, pkgDir string) ([]domain.TestID, er
 // importPath resolves the module import path for a directory, so TestID carries
 // a stable identity (":" in a capsule must not depend on the caller's cwd).
 func (e *Exec) importPath(ctx context.Context, pkgDir string) (string, error) {
-	cmd := exec.CommandContext(ctx, e.goBin(), "list", "-f", "{{.ImportPath}}", ".")
+	cmd := commandContext(ctx, e.goBin(), "list", "-f", "{{.ImportPath}}", ".")
 	cmd.Dir = pkgDir
 	out, err := cmd.Output()
 	if ctx.Err() != nil {

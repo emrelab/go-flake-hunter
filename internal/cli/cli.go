@@ -10,7 +10,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"github.com/emrelab/go-flake-hunter/internal/domain"
@@ -26,6 +25,10 @@ type IO struct {
 	// Debug is enabled by --debug: internal error detail is shown to the user.
 	// In normal mode only an id and "use --debug for detail" are printed.
 	Debug bool
+	// Progress receives scan snapshots; callers must not block the observer.
+	Progress func(domain.ScanProgress)
+	// ExpectedRegression binds a TUI write to its approved source; nil skips the check.
+	ExpectedRegression []byte
 }
 
 // Command is a single subcommand.
@@ -53,6 +56,9 @@ func Execute(ctx context.Context, args []string, out IO) int {
 
 	cmds := commands()
 	if len(args) == 0 {
+		if interactiveTUI(out.Stdout) {
+			return Execute(ctx, []string{"tui"}, out)
+		}
 		usage(out.Stderr, cmds)
 		return domain.ExitUsage
 	}
@@ -60,6 +66,13 @@ func Execute(ctx context.Context, args []string, out IO) int {
 	name := args[0]
 	switch name {
 	case "-h", "--help", "help":
+		if len(args) == 2 && name == "help" {
+			return Execute(ctx, []string{args[1], "--help"}, out)
+		}
+		if len(args) > 1 {
+			_, _ = fmt.Fprintln(out.Stderr, "usage: go-flake-hunter help [command]")
+			return domain.ExitUsage
+		}
 		usage(out.Stdout, cmds)
 		return domain.ExitOK
 	case "-v", "--version", "version":
@@ -101,6 +114,7 @@ func Execute(ctx context.Context, args []string, out IO) int {
 // in Execute. Folding everything into ErrUsage would report `hunt --help`
 // to CI as exit 2, "the command is broken".
 func parseFlags(fs *flag.FlagSet, args []string) error {
+	fs.Usage = func() { commandHelp(fs) }
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return err
@@ -114,7 +128,11 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 func stripDebug(args []string) ([]string, bool) {
 	rest := make([]string, 0, len(args))
 	debug := false
-	for _, a := range args {
+	for i, a := range args {
+		if a == "--" {
+			rest = append(rest, args[i:]...)
+			return rest, debug
+		}
 		if a == "--debug" {
 			debug = true
 			continue
@@ -174,33 +192,23 @@ func (e internalError) Unwrap() error { return e.err }
 func Internal(id string, err error) error { return internalError{id: id, err: err} }
 
 func usage(w io.Writer, cmds []Command) {
-	_, _ = fmt.Fprint(w, "go-flake-hunter — flake reproduction and regression test generation for Go tests\n\n")
-	_, _ = fmt.Fprint(w, "Usage:\n  go-flake-hunter <command> [flags]\n\nGlobal flag: --debug (internal error detail)\n\nCommands:\n")
-	sorted := make([]Command, len(cmds))
-	copy(sorted, cmds)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
-	width := 0
-	for _, c := range sorted {
-		width = max(width, len(c.Name))
+	_, _ = fmt.Fprint(w, "go-flake-hunter — reproduce flaky Go tests and preserve the regression\n\nUsage:\n  go-flake-hunter <command> [arguments] [flags]\n\nStart here:\n  go-flake-hunter doctor ./...\n  go-flake-hunter hunt ./...\n  go-flake-hunter compile --verify\n\nCommands:\n")
+	for _, c := range cmds {
+		_, _ = fmt.Fprintf(w, "  %-10s %s\n", c.Name, c.Summary)
 	}
-	for _, c := range sorted {
-		state := ""
-		if c.Run == nil {
-			state = fmt.Sprintf(" [task %d]", c.Task)
-		}
-		_, _ = fmt.Fprintf(w, "  %-*s  %s%s\n", width, c.Name, c.Summary, state)
-	}
-	_, _ = fmt.Fprint(w, "\nDocs: docs/ARCHITECTURE.md\n")
+	_, _ = fmt.Fprint(w, "\nHelp:\n  go-flake-hunter help <command>   Usage, examples and options\n  go-flake-hunter version          Show the installed version\n  --debug                         Include internal error details\n\nDocs: https://github.com/emrelab/go-flake-hunter#readme\n")
 }
 
-// commands are the registered commands. Order is not shown to the user (printed alphabetically).
+// commands lists the CLI in workflow order.
 func commands() []Command {
 	return []Command{
+		{Name: "tui", Summary: "open the interactive terminal workspace", Run: tuiCmd},
 		{Name: "hunt", Summary: "scan packages, find flake candidates", Run: hunt},
 		{Name: "repro", Summary: "reproduce and shrink one known flake", Run: reproCmd},
 		{Name: "compile", Summary: "generate a permanent regression test from a capsule", Run: compileCmd},
 		{Name: "replay", Summary: "run a capsule N times, verify determinism", Run: replayCmd},
 		{Name: "explain", Summary: "render a capsule as a human-readable report", Run: explainCmd},
 		{Name: "init", Summary: "write a GitHub Actions workflow scaffold", Run: initCmd},
+		{Name: "doctor", Summary: "check Go, packages and write access without running tests", Run: doctorCmd},
 	}
 }

@@ -148,34 +148,93 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
       - uses: actions/download-artifact@v8
         with:
           pattern: binary-*
           path: dist
           merge-multiple: true
 
+      # Verify complete artifact inventory before generating checksums or publishing.
+      # Expected: 5 binaries + 5 SBOMs for linux/amd64, linux/arm64, darwin/amd64,
+      # darwin/arm64, windows/amd64. No extra files allowed.
+      - name: verify artifact inventory
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          EXPECTED=(
+            "go-flake-hunter-$VERSION-linux-amd64"
+            "go-flake-hunter-$VERSION-linux-amd64.spdx.json"
+            "go-flake-hunter-$VERSION-linux-arm64"
+            "go-flake-hunter-$VERSION-linux-arm64.spdx.json"
+            "go-flake-hunter-$VERSION-darwin-amd64"
+            "go-flake-hunter-$VERSION-darwin-amd64.spdx.json"
+            "go-flake-hunter-$VERSION-darwin-arm64"
+            "go-flake-hunter-$VERSION-darwin-arm64.spdx.json"
+            "go-flake-hunter-$VERSION-windows-amd64.exe"
+            "go-flake-hunter-$VERSION-windows-amd64.exe.spdx.json"
+          )
+          if [ ! -d dist ]; then
+            echo "dist directory missing" >&2
+            exit 1
+          fi
+          # Check each expected file exists and is non-empty
+          for f in "${EXPECTED[@]}"; do
+            if [ ! -f "dist/$f" ]; then
+              echo "missing expected file: $f" >&2
+              exit 1
+            fi
+            if [ ! -s "dist/$f" ]; then
+              echo "empty file: $f" >&2
+              exit 1
+            fi
+          done
+          # Check no unexpected files in dist/
+          mapfile -t ACTUAL < <(cd dist && find . -maxdepth 1 -type f -printf '%f\n' | sort)
+          mapfile -t EXPECTED_SORTED < <(printf '%s\n' "${EXPECTED[@]}" | sort)
+          if ! diff -u <(printf '%s\n' "${EXPECTED_SORTED[@]}") <(printf '%s\n' "${ACTUAL[@]}"); then
+            echo "unexpected files in dist/; expected exactly the 10 release assets" >&2
+            exit 1
+          fi
+          echo "artifact inventory verified: 5 binaries + 5 SBOMs"
+
+      # Verify the release tag is annotated (has a message) before using it for release notes.
+      - name: verify annotated tag
+        run: |
+          set -euo pipefail
+          if ! git tag -l --format='%(objecttype)' "$GITHUB_REF_NAME" | grep -q '^tag$'; then
+            echo "release tag $GITHUB_REF_NAME is not annotated (no tag object)" >&2
+            exit 1
+          fi
+          TAG_MSG=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME")
+          if [ -z "$TAG_MSG" ]; then
+            echo "annotated tag $GITHUB_REF_NAME has empty message" >&2
+            exit 1
+          fi
+
       # One line per binary: "<sha256>  go-flake-hunter-<version>-<os>-<arch>".
       # The action verifies the binary it downloads against exactly this file.
       - name: checksums
-        run: (cd dist && sha256sum go-flake-hunter-* > SHA256SUMS)
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum go-flake-hunter-* > SHA256SUMS)
 
       - name: release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # --repo is not decoration: this job checks out nothing, and gh
-          # resolves the repository from a git working tree otherwise
-          # ("failed to run git: fatal: not a git repository" — v0.2.0).
-          #
-          # --notes-from-tag, not --generate-notes: the release notes are the
-          # annotated tag message, which is the one place a release can say WHY
-          # a version is breaking. --generate-notes lists merged PR titles and
-          # silently discards that message — v0.3.0 shipped a release page
-          # containing nothing but the compare link. CONTRIBUTING.md "Releasing"
-          # states the tag requirement this step depends on.
+          # Extract annotated tag message for release notes.
+          # --notes-from-tag is incompatible with --repo in gh CLI.
+          # We extract the message locally and pass via --notes-file.
+          TAG_MSG=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME")
+          printf '%s\n' "$TAG_MSG" > /tmp/release-notes.md
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --notes-from-tag \
+            --notes-file /tmp/release-notes.md \
             --title "go-flake-hunter $GITHUB_REF_NAME"

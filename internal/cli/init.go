@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	iofs "io/fs"
 	"os"
 	"path/filepath"
@@ -122,7 +123,16 @@ func initCmd(ctx context.Context, args []string, out IO) error {
 	if replayCapsule != "" {
 		workflow = strings.Replace(workflow, "      - name: attach report", replayGate(replayCapsule)+"      - name: attach report", 1)
 	}
-	if err := os.WriteFile(path, []byte(workflow), 0o644); err != nil {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, os.ErrExist) {
+		_, _ = fmt.Fprintf(out.Stdout, "already exists, untouched: %s\n", path)
+		return nil
+	}
+	if err != nil {
+		return domain.Wrap(domain.ErrInternal, "could not write %s: %v", path, err)
+	}
+	_, writeErr := io.WriteString(f, workflow)
+	if err := errors.Join(writeErr, f.Close()); err != nil {
 		return domain.Wrap(domain.ErrInternal, "could not write %s: %v", path, err)
 	}
 

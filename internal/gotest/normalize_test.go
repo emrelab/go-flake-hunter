@@ -1,6 +1,9 @@
 package gotest
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNormalizeCollapsesNoise(t *testing.T) {
 	a := "2026/11/02 01:04:33 startup failed: /tmp/abc123/x.db (0xc000123456) 12.5ms 127.0.0.1:54321"
@@ -13,14 +16,43 @@ func TestNormalizeCollapsesNoise(t *testing.T) {
 }
 
 func TestNormalizeKeepsMeaning(t *testing.T) {
-	in := "shared state polluted: seeded=42"
-	if got := Normalize(in); got != in {
-		t.Errorf("meaningful text must not be changed, got: %q", got)
+	for _, tc := range []struct {
+		input, want string
+	}{
+		{"shared state polluted: seeded=42", "shared state polluted: seeded=42"},
+		{"2026-11-02T01:04:33.123Z", "<ts>"},
+		{"/var/folders/abc/run/file", "<tmp>"},
+		{"/private/var/folders/abc/run/file", "/private<tmp>"},
+		{"0xc000123456", "<ptr>"},
+		{"12.5ms 1µs 2ns 3s", "<dur> <dur> <dur> <dur>"},
+		{"127.0.0.1:54321 [::1]:54322", "<addr> <addr>"},
+		{strings.Repeat("1ms ", 1000), strings.Repeat("<dur> ", 1000)},
+	} {
+		if got := Normalize(tc.input); got != tc.want {
+			t.Errorf("Normalize(%q) = %q, want %q", tc.input, got, tc.want)
+		}
 	}
 }
 
 func TestNormalizeEmpty(t *testing.T) {
 	if Normalize("") != "" {
 		t.Error("empty input must return empty")
+	}
+}
+
+func BenchmarkNormalize(b *testing.B) {
+	for _, tc := range []struct {
+		name, input string
+	}{
+		{"clean", "shared state polluted: seeded=42"},
+		{"noise", "2026/11/02 01:04:33 startup failed: /tmp/abc123/x.db (0xc000123456) 12.5ms 127.0.0.1:54321"},
+		{"dense", strings.Repeat("1ms 127.0.0.1:54321 0xc000123456 ", 1000)},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				Normalize(tc.input)
+			}
+		})
 	}
 }

@@ -51,6 +51,31 @@ func TestRenderIsValidGo(t *testing.T) {
 	}
 }
 
+func TestWriteRequiresApprovedSource(t *testing.T) {
+	c := capsule()
+	src, err := compile.Render(c, "orderbasic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opt := compile.Options{Dir: t.TempDir(), SourceFile: "checkout_test.go", Write: true, ExpectedSource: src}
+	if _, err := compile.Write(c, "changed", opt); err == nil {
+		t.Fatal("wrote a source that differs from the approved preview")
+	}
+	if entries, err := os.ReadDir(opt.Dir); err != nil || len(entries) != 0 {
+		t.Fatalf("rejected write touched the directory: %v %v", entries, err)
+	}
+	path, err := compile.Write(c, "orderbasic", opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := compile.Write(c, "changed", opt); err == nil {
+		t.Fatal("replaced an existing file using a stale approval")
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, src) {
+		t.Fatalf("existing file changed: %v", err)
+	}
+}
+
 // fixtureDir copies the order-basic fixture into a temp dir.
 //
 // Tests must never write into testdata: a generated file left behind by an

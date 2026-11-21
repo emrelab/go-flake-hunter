@@ -146,6 +146,8 @@ type Options struct {
 	SourceFile string
 	// Write enables touching the filesystem. False -> Render only.
 	Write bool
+	// ExpectedSource, when non-nil, must match Render before any file is written.
+	ExpectedSource []byte
 }
 
 // Render returns the gofmt-clean source of the permanent regression test.
@@ -250,6 +252,9 @@ func Write(c domain.Capsule, clause string, opt Options) (string, error) {
 	}
 	if !opt.Write {
 		return "", nil
+	}
+	if opt.ExpectedSource != nil && !bytes.Equal(src, opt.ExpectedSource) {
+		return "", domain.Wrap(domain.ErrUsage, "regression source changed since preview; preview it again before writing")
 	}
 
 	name := OutputName(opt.Dir, opt.SourceFile, c.Witness.Victim.Name)

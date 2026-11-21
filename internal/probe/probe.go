@@ -13,6 +13,8 @@ type Target struct {
 	Test  domain.TestID
 	Dir   string // package directory (the probe's cwd for go test)
 	Facts facts.PkgFacts
+	// Progress observes the active hypothesis; it never changes the verdict.
+	Progress func(string)
 }
 
 // Probe is one hypothesis. Implementations must be safe to call with a target
@@ -99,6 +101,9 @@ func (r *Registry) Run(ctx context.Context, tgt Target, runner gotest.Runner) (*
 			continue
 		}
 
+		if tgt.Progress != nil {
+			tgt.Progress(p.Name())
+		}
 		w, err := p.Probe(ctx, tgt, runner)
 		res.Tried = append(res.Tried, Attempt{Probe: p.Name(), Kind: p.Kind(), Err: err})
 		if err != nil {

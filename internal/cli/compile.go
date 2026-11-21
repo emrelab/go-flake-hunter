@@ -118,9 +118,10 @@ func compileCmd(ctx context.Context, args []string, out IO) error {
 	}
 
 	path, err := compile.Write(c, clause, compile.Options{
-		Dir:        pkgDir,
-		SourceFile: sourceFile(pkgDir, c.Witness.Victim.Name),
-		Write:      true,
+		Dir:            pkgDir,
+		SourceFile:     sourceFile(pkgDir, c.Witness.Victim.Name),
+		Write:          true,
+		ExpectedSource: out.ExpectedRegression,
 	})
 	if err != nil {
 		return err

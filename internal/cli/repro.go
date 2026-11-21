@@ -28,11 +28,14 @@ func reproCmd(ctx context.Context, args []string, out IO) error {
 	fs.SetOutput(out.Stderr)
 	o.addFlags(fs)
 	fs.StringVar(&fromJSON, "from-json", "",
-		"failed `go test -json` log as suspect source (file, or - for stdin)")
+		"failed go test -json log `file` as suspect source (or - for stdin)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if err := validateRunFormat(o.format); err != nil {
+		return err
+	}
+	if err := validateProgress(o.progress); err != nil {
 		return err
 	}
 	rest := fs.Args()
@@ -64,13 +67,18 @@ func reproCmd(ctx context.Context, args []string, out IO) error {
 		return err
 	}
 	s := newScanner(out, o, only)
+	stopProgress := s.startProgress(len(dirs), "Packages")
+	defer stopProgress()
 	var runErr error
 	for _, dir := range dirs {
-		if err := s.pkg(ctx, dir); err != nil {
+		err := s.pkg(ctx, dir)
+		s.progress.finish(s.relDir(dir), err)
+		if err != nil {
 			runErr = err
 			break
 		}
 	}
+	stopProgress()
 	if err := s.flush(); err != nil {
 		return err
 	}
@@ -119,6 +127,9 @@ func reproFromJSON(ctx context.Context, fromJSON string, o huntOptions, out IO) 
 		return err
 	}
 	s := newScanner(out, o, "")
+	stopProgress := s.startProgress(len(suspects), "Suspects")
+	defer stopProgress()
+	out.Stderr = s.out.Stderr
 	warned := map[string]bool{}
 	var runErr error
 	for _, sus := range suspects {
@@ -133,7 +144,9 @@ func reproFromJSON(ctx context.Context, fromJSON string, o huntOptions, out IO) 
 		}
 
 		s.only = sus.Name
-		if err := s.pkg(ctx, dir); err != nil {
+		err := s.pkg(ctx, dir)
+		s.progress.finish(s.relDir(dir), err)
+		if err != nil {
 			if errors.Is(err, domain.ErrUsage) {
 				// The log names a test the package no longer has (a stale CI
 				// artifact): report it, do not let it veto the remaining suspects.
@@ -144,6 +157,7 @@ func reproFromJSON(ctx context.Context, fromJSON string, o huntOptions, out IO) 
 			break
 		}
 	}
+	stopProgress()
 	if err := s.flush(); err != nil {
 		return err
 	}

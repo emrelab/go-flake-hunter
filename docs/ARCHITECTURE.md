@@ -92,7 +92,8 @@ go-flake-hunter/
 │   ├── policy/             budgets, directory locks and redaction
 │   ├── probe/              repeat, order, parallel and environment hypotheses
 │   ├── report/             text, JSON, Markdown and SARIF
-│   └── search/             minimization and verification
+│   ├── search/             minimization and verification
+│   └── terminal/           native console input, size and mode restoration
 ├── testdata/               fixture modules and golden files
 ├── scripts/                local validation and maintenance
 └── .github/workflows/      CI, nightly, release and Pages
@@ -763,6 +764,15 @@ The price of the build tag: `go test ./...` does not see this. In exchange, the 
 
 ## 10. Budget, cancellation, error handling
 
+All commands in `internal/gotest` share cancellation setup. Linux/macOS isolate
+the Go command in a process group and kill that group on cancellation; Windows
+uses a kill-on-close Job Object, assigned before resuming the suspended driver.
+Explicit job termination and last-handle closure both stop descendants; setup
+failures kill and reap the suspended driver.
+`exec.Cmd.WaitDelay` also bounds waits on inherited pipes. A real child-process
+regression test synchronizes driver and descendant readiness, then checks that
+their independently owned connections close after cancellation; CI runs it on all three release OSes.
+
 ```go
 type Budget struct {
 	MaxRuns int           // default 1000 (policy.DefaultMaxRuns)
@@ -987,7 +997,7 @@ This fence is the written answer to "one more feature" requests: every item is a
 | Question | Answer |
 |---|---|
 | What? | A CLI that drives `go test` and shrinks order/parallelism/environment flakes into a **permanent regression test** |
-| How many packages? | 12 internal packages, all under `internal/`; external dependencies: **zero** |
+| How many packages? | 14 internal packages, all under `internal/`; external dependencies: **zero** |
 | Most critical type? | `domain.RunSpec` / `RunResult` / `Witness` — single source of truth |
 | Most critical interface? | `gotest.Runner` — the foundation of all testability |
 | Most critical file? | `internal/harness` — both the search and the artifact generator |
@@ -1003,3 +1013,34 @@ per victim, so compiling siblings cannot erase earlier regressions. Recompiling
 a victim updates its existing witness. For upgrades, a legacy generated
 `<source>_goflakehunter_test.go` declaring that victim's regression is reused;
 other victims get separate files. Output owned by the user is still refused.
+
+## CLI presentation and environment checks
+
+Help is generated from each command’s registered flags and grouped into search,
+budget, output and CI options. `help <command>` uses the same parser as `--help`.
+The `--` terminator also protects literal `--debug` arguments.
+
+Scan progress belongs to stderr. A synchronized writer coordinates diagnostics
+and text reports with one live terminal line; CI uses plain lines. A bounded
+ticker reads the shared budget without reserving runs. Each package worker owns
+its verdicts; progress callbacks only observe the active hypothesis. JSON/SARIF
+report schemas and exit decisions are independent of presentation.
+
+`doctor` reads selected Go metadata through `internal/gotest`, resolves test
+package directories and checks write access using temporary non-Go files. It
+does not execute target code. JSON doctor output has its own v1 schema.
+
+
+## Interactive terminal
+
+The `tui` command (also selected by a bare invocation on real terminals outside
+CI) owns one event loop. Background jobs call the existing CLI commands, publish
+bounded logs and immutable progress snapshots, and return results over a channel.
+The UI never starts tests during workspace discovery. Hunt continues to own
+budgets, locks, partial capsules and witness cleanup.
+
+`internal/terminal` saves native input/output modes, reads cancellably and reports
+viewport size. The UI restores the previous screen, cursor and modes after jobs
+finish cleanup. It uses only the Go standard library on Linux, macOS and Windows.
+The real-PTY `make tui-smoke` checks the complete Unix workflow. See
+[TUI.md](TUI.md) for keyboard controls, platform limits and write confirmation.

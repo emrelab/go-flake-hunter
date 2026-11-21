@@ -2,6 +2,8 @@ package gotest
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/emrelab/go-flake-hunter/internal/domain"
@@ -47,6 +49,9 @@ func (c *Cache) Discover(ctx context.Context, pkgDir string) ([]domain.TestID, e
 
 // Run returns a cached PASS/SKIP result when the exact spec was seen before.
 func (c *Cache) Run(ctx context.Context, spec domain.RunSpec) (*domain.RunResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if domain.RequiresFreshRuns(ctx) {
 		return c.inner.Run(ctx, spec)
 	}
@@ -107,64 +112,37 @@ func cacheable(res *domain.RunResult) bool {
 // specKey is the identity of a run. Env participates because a probe that
 // varies the environment must not collide with the baseline.
 func specKey(s domain.RunSpec) string {
-	key := s.Package + "\x00" + s.RunRegex + "\x00"
-	key += itoa(s.Count) + "\x00" + itoa(s.Parallel) + "\x00" + itoa(s.CPU) + "\x00"
-	key += itoa64(s.ShuffleSeed) + "\x00" + boolStr(s.Race) + boolStr(s.Short)
+	var key strings.Builder
+	key.Grow(len(s.Package) + len(s.RunRegex) + len(s.Source) + 96)
+	key.WriteString(s.Package)
+	key.WriteByte(0)
+	key.WriteString(s.RunRegex)
+	var number [20]byte
+	for _, value := range [...]int64{int64(s.Count), int64(s.Parallel), int64(s.CPU), s.ShuffleSeed, int64(s.Timeout)} {
+		key.WriteByte(0)
+		key.Write(strconv.AppendInt(number[:0], value, 10))
+	}
+	key.WriteByte(0)
+	key.WriteString(boolStr(s.Race))
+	key.WriteString(boolStr(s.Short))
 	// Witness content is part of the key: same package + same -run means a
 	// different step set. Without this, the PASS of one ddmin subset was served
 	// to another, and the search eliminated the real polluter.
-	key += "\x00" + s.Source
+	key.WriteByte(0)
+	key.WriteString(s.Source)
+	key.WriteByte(0)
+	key.Write(strconv.AppendInt(number[:0], int64(len(s.Env)), 10))
 	for _, e := range s.Env {
-		key += "\x00" + e
+		key.WriteByte(0)
+		key.WriteString(e)
 	}
+	key.WriteByte(0)
+	key.Write(strconv.AppendInt(number[:0], int64(len(s.Tags)), 10))
 	for _, t := range s.Tags {
-		key += "\x01" + t
+		key.WriteByte(0)
+		key.WriteString(t)
 	}
-	return key
-}
-
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	neg := i < 0
-	if neg {
-		i = -i
-	}
-	var b [20]byte
-	p := len(b)
-	for i > 0 {
-		p--
-		b[p] = byte('0' + i%10)
-		i /= 10
-	}
-	if neg {
-		p--
-		b[p] = '-'
-	}
-	return string(b[p:])
-}
-
-func itoa64(i int64) string {
-	if i == 0 {
-		return "0"
-	}
-	neg := i < 0
-	if neg {
-		i = -i
-	}
-	var b [20]byte
-	p := len(b)
-	for i > 0 {
-		p--
-		b[p] = byte('0' + i%10)
-		i /= 10
-	}
-	if neg {
-		p--
-		b[p] = '-'
-	}
-	return string(b[p:])
+	return key.String()
 }
 
 func boolStr(b bool) string {

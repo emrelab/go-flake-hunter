@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/emrelab/go-flake-hunter/internal/domain"
@@ -12,7 +11,7 @@ import (
 
 // BuildTags reads the effective -tags flag from Go's configuration.
 func BuildTags(ctx context.Context, dir string) []string {
-	cmd := exec.CommandContext(ctx, "go", "env", "GOFLAGS")
+	cmd := commandContext(ctx, "go", "env", "GOFLAGS")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -33,7 +32,7 @@ func PackageFiles(ctx context.Context, dir string, tags []string) (domain.Packag
 	if len(tags) > 0 {
 		args = append(args, "-tags", strings.Join(tags, ","))
 	}
-	cmd := exec.CommandContext(ctx, "go", append(args, ".")...)
+	cmd := commandContext(ctx, "go", append(args, ".")...)
 	cmd.Dir = dir
 	var p domain.PackageFiles
 	out, err := cmd.Output()
@@ -53,7 +52,7 @@ func PackageFiles(ctx context.Context, dir string, tags []string) (domain.Packag
 }
 
 func TargetGoVersion(ctx context.Context, dir string) string {
-	cmd := exec.CommandContext(ctx, "go", "env", "GOVERSION")
+	cmd := commandContext(ctx, "go", "env", "GOVERSION")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {

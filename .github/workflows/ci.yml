@@ -9,12 +9,16 @@ on:
 permissions:
   contents: read
 
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        go: ['1.24', '1.26']
     runs-on: ${{ matrix.os }}
     # The Windows runner's default shell is pwsh; the steps assume POSIX scripts
     # (make, $(...) capture, ./go-flake-hunter). Pinned to bash in one place.
@@ -33,7 +37,7 @@ jobs:
           GIT_CONFIG_VALUE_0: 'false'
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
+          go-version: ${{ matrix.go }}
           # Zero dependencies, so there is no module cache worth restoring —
           # and v7's default cache looks for go.sum, which this module has not.
           cache: false
@@ -51,7 +55,16 @@ jobs:
         # `go test` subprocesses, so its wall time follows the runner's disk
         # and CPU, not the assertion count. Measured on the slowest runner
         # (windows-latest): 4m06s — 15m is ~3.5x headroom.
-        run: go test -timeout 15m -race ./...
+        run: go test -timeout 15m -race -count=1 -v ./...
+
+      - name: native cancellation and console regressions
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          go test -race -timeout 5m -count=3 -v -run 'Test(CancellationStopsDescendants|DeadlineStopsDescendants|StoreSizeBoundaryRoundTrip|StorePartialWritePreservesEvidence|WindowsKeyRecords)$' ./internal/gotest ./internal/capsule ./internal/terminal
+          if [ "$RUNNER_OS" = Windows ]; then
+            go test -race -timeout 5m -count=3 -v -run 'TestWindows(Job|Console)' ./internal/gotest ./internal/terminal
+          fi
 
       # The tool itself must not produce flakes. A state leak is caught here.
       #
@@ -69,11 +82,26 @@ jobs:
         run: |
           # -timeout applies per package; the sweep multiplies the subprocess
           # spawns, so keep the headroom the old single invocation had.
-          go test -timeout 30m -count=3 $(go list ./... | grep -v '/internal/cli')
+          packages=()
+          while IFS= read -r pkg; do packages+=("$pkg"); done < <(go list ./... | grep -v '/internal/cli')
+          go test -timeout 30m -count=3 "${packages[@]}"
           go test -timeout 15m -count=1 ./internal/cli/...
 
       - name: fixtures
+        if: matrix.go != '1.24'
         run: make fixtures
+
+      - name: fixtures compatible with Go 1.24
+        if: matrix.go == '1.24'
+        run: |
+          for dir in testdata/fixtures/*/; do
+            if [ "$dir" = testdata/fixtures/synctest-bubble/ ]; then
+              echo "::notice::synctest-bubble requires Go 1.26 and is validated in the Go 1.26 jobs"
+              continue
+            fi
+            echo "== $dir"
+            (cd "$dir" && go build ./... && go vet ./...) || exit 1
+          done
 
       - name: build
         run: make build
@@ -81,25 +109,26 @@ jobs:
       - name: smoke (help)
         run: ./go-flake-hunter help
 
-  # go.mod's floor is go 1.24 (measured: `t.Chdir` in the cli tests is the
-  # newest API used). This job proves the floor on a real 1.24 toolchain
-  # instead of trusting the directive. Unit tests only (-short): the
-  # fixture-driven integration tests drive a modern toolchain end to end and
-  # belong to the 1.26 job.
-  oldest:
+  # The native matrix covers the Go 1.24 floor and the release toolchain.
+  # Intermediate and current Go versions exercise the full suite once on Linux.
+  compatibility:
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.25', '1.27']
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.24'
+          go-version: ${{ matrix.go }}
           cache: false
       - name: vet
         run: go vet ./...
       - name: build
         run: make build
-      - name: unit tests
-        run: go test -race -short ./...
+      - name: full race suite
+        run: go test -race -timeout 15m -count=1 -v ./...
 
   # Gates that need one OS, not three: lint, the Action's step scripts, and the
   # vulnerability scan. Pinned module versions, not @latest: a CI tool that
@@ -126,15 +155,63 @@ jobs:
         env:
           GFH_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/smoke-capsules
         run: make smoke
+      - name: interactive terminal smoke
+        env:
+          GOFLAGS: -race
+        run: make tui-smoke
       - uses: actions/upload-artifact@v7
+        id: upload-smoke-capsule
         with:
           name: smoke-capsule-${{ github.run_attempt }}
           path: ${{ runner.temp }}/smoke-capsules/gfh_*.json
           if-no-files-found: error
-      - uses: actions/download-artifact@v8
-        with:
-          name: smoke-capsule-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/smoke-downloaded
+      - name: download smoke capsule with retry and digest verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload-smoke-capsule.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.upload-smoke-capsule.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          # Bounded retry for GitHub Actions artifact visibility lag.
+          # The artifact upload succeeds but internal indexing may not
+          # immediately make it available via artifact-ids lookup.
+          # Retry with increasing backoff using GitHub REST API.
+          # Delays: 5, 15, 30 seconds (max 4 attempts).
+          # Verifies SHA256 digest of downloaded ZIP before extraction.
+          attempts=0
+          max_attempts=4
+          delays=(5 15 30)
+          expected_digest="${ARTIFACT_DIGEST#sha256:}"
+          mkdir -p "$RUNNER_TEMP/smoke-downloaded"
+          while [ $attempts -lt $max_attempts ]; do
+            # Download ZIP to file, keeping stderr separate for error diagnosis
+            zip_path="$RUNNER_TEMP/smoke-downloaded/artifact.zip"
+            if gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip" \
+              > "$zip_path" 2>"$zip_path.err"; then
+              # Verify SHA256 digest matches uploaded artifact
+              actual_digest=$(sha256sum "$zip_path" | awk '{print $1}')
+              if [ "$actual_digest" != "$expected_digest" ]; then
+                echo "Checksum mismatch: expected $expected_digest, got $actual_digest" >&2
+                cat "$zip_path.err" >&2
+                exit 1
+              fi
+              # Extract and verify
+              unzip -q -o "$zip_path" -d "$RUNNER_TEMP/smoke-downloaded"
+              rm "$zip_path" "$zip_path.err"
+              echo "Artifact downloaded and verified on attempt $((attempts + 1))"
+              break
+            fi
+            attempts=$((attempts + 1))
+            if [ $attempts -eq $max_attempts ]; then
+              echo "All $max_attempts download attempts failed" >&2
+              cat "$zip_path.err" >&2
+              exit 1
+            fi
+            echo "Attempt $attempts failed, waiting ${delays[$attempts - 1]}s before retry..." >&2
+            sleep "${delays[$attempts - 1]}"
+          done
       - name: verify capsule round trip
         run: |
           set -euo pipefail
@@ -157,8 +234,8 @@ jobs:
 
   # Dogfooding: our own tool hunts flakes in our own repo. If a witness file
   # or a leaked global makes our suite order-dependent, this step goes red.
-  # Exit 4 (budget exhausted) is inconclusive, not a failure: it warns and
-  # lets the nightly sweep carry the full load.
+  # The scan must finish: a budget-exhausted result is inconclusive and fails
+  # this gate instead of turning an incomplete scan into a green check.
   self-hunt:
     runs-on: ubuntu-latest
     steps:
@@ -184,16 +261,12 @@ jobs:
           # failing line kills the script BEFORE rc can be read. The guard
           # below was dead code until that was noticed (self-hunt @ d92e895).
           rc=0
-          # 600 runs: the sweep's run count is deterministic; measured on the
-          # current tree at just under that. 15m wall for slower runners.
-          ./go-flake-hunter hunt ./... --capsule-dir "$RUNNER_TEMP/capsules" --fail-on-flake --short --budget 600 --timeout 15m || rc=$?
+          # The expanded suite exceeds the former 600-run ceiling. Use the
+          # normal 1000-run budget and require completion, with 15m wall time.
+          ./go-flake-hunter hunt ./... --capsule-dir "$RUNNER_TEMP/capsules" --fail-on-flake --short --budget 1000 --timeout 15m || rc=$?
           shopt -s nullglob
           capsules=("$RUNNER_TEMP"/capsules/gfh_*.json)
           if [ "${#capsules[@]}" -gt 0 ]; then echo "capsules=true" >> "$GITHUB_OUTPUT"; fi
-          if [ "$rc" -eq 4 ]; then
-            echo "::warning::self-hunt ran out of budget — inconclusive, nightly carries the sweep"
-            exit 0
-          fi
           exit "$rc"
       - name: save capsules
         if: always() && steps.hunt.outputs.capsules == 'true'

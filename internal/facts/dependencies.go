@@ -2,26 +2,15 @@ package facts
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
 	"path/filepath"
 	"strconv"
 )
 
 // externalDependencies is advisory syntax evidence, never a verdict about a
 // test or a reason to skip reproduction. Arguments and secret values are absent.
-func externalDependencies(dir string, files []string) []string {
+func externalDependencies(files []*ast.File) []string {
 	var out []string
-	for _, name := range files {
-		src, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil {
-			continue
-		}
-		f, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
-		if err != nil {
-			continue
-		}
+	for _, f := range files {
 		imports := map[string]string{}
 		for _, im := range f.Imports {
 			path, _ := strconv.Unquote(im.Path.Value)
@@ -62,7 +51,7 @@ func externalDependencies(dir string, files []string) []string {
 			return true
 		})
 	}
-	return dedupeSort(out)
+	return out
 }
 func oneOf(s string, candidates ...string) bool {
 	for _, c := range candidates {

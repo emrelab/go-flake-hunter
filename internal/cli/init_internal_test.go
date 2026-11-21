@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +11,26 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestInitDoesNotFollowDanglingWorkflowSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "must-not-create.yml")
+	path := filepath.Join(root, workflowPath)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, path); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	var out bytes.Buffer
+	_ = initCmd(context.Background(), []string{root}, IO{Stdout: &out, Stderr: &out})
+	if _, err := os.Stat(outside); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("init wrote through a dangling workflow symlink")
+	}
+	if info, err := os.Lstat(path); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("init replaced the existing symlink")
+	}
+}
 
 func TestAuditC3_ReplayScaffoldGatePreservesExitContract(t *testing.T) {
 	dir := t.TempDir()

@@ -1,6 +1,9 @@
 package gotest
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // Patterns that differ between two runs of the same failing test. Left in place
 // they make every failure look unique and break "same defect" grouping.
@@ -29,7 +32,21 @@ func Normalize(s string) string {
 	}
 	out := s
 	for i, re := range normalizers {
-		out = re.ReplaceAllString(out, replacements[i])
+		// ReplaceAllString copies the input even when nothing matches.
+		matches := re.FindAllStringIndex(out, -1)
+		if len(matches) == 0 {
+			continue
+		}
+		var b strings.Builder
+		b.Grow(len(out))
+		last := 0
+		for _, match := range matches {
+			b.WriteString(out[last:match[0]])
+			b.WriteString(replacements[i])
+			last = match[1]
+		}
+		b.WriteString(out[last:])
+		out = b.String()
 	}
 	return out
 }

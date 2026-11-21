@@ -2,11 +2,32 @@ package gotest_test
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/emrelab/go-flake-hunter/internal/domain"
 	"github.com/emrelab/go-flake-hunter/internal/gotest"
 )
+
+func TestCacheHonorsTimeoutAndCancellation(t *testing.T) {
+	fake := &gotest.Fake{RunFn: func(s domain.RunSpec) (*domain.RunResult, error) {
+		return gotest.Result(s, map[string]domain.Status{"TestA": domain.StatusPass}), nil
+	}}
+	c := gotest.NewCache(fake, 0)
+	spec := domain.RunSpec{Package: "p", Count: 1, Timeout: time.Minute}
+	_, _ = c.Run(context.Background(), spec)
+	spec.Timeout = time.Second
+	_, _ = c.Run(context.Background(), spec)
+	if fake.CallCount() != 2 {
+		t.Fatal("different timeouts reused the same observation")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.Run(ctx, spec); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cached result ignored cancellation: %v", err)
+	}
+}
 
 // A passing run asked again must not reach the real binary: the shuffle sweep
 // should be paid once per package, not once per test.

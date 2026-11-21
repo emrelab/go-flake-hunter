@@ -84,6 +84,39 @@ func TestPackagesOverlapAndDeduplicate(t *testing.T) {
 		t.Fatalf("duplicate directory scanned: %d", calls.Load())
 	}
 }
+
+func TestScannerReportsActiveProbe(t *testing.T) {
+	dir := testModule(t)
+	var log bytes.Buffer
+	p := scanProbe{fn: func(_ context.Context, _ probe.Target, _ gotest.Runner) (*domain.Witness, error) {
+		return nil, probe.ErrNotReproduced
+	}}
+	r := &gotest.Fake{DiscoverFn: func(string) ([]domain.TestID, error) {
+		return []domain.TestID{{Package: "fixture/scanner", Name: "TestPlain"}}, nil
+	}}
+	s := testScanner(p, r)
+	s.o.format, s.o.progress, s.out.Stderr = "text", "plain", &log
+	stop := s.startProgress(1, "Packages")
+	defer stop()
+	// Inspect from the probe itself: the phase must be observable before it runs.
+	p.fn = func(_ context.Context, _ probe.Target, _ gotest.Runner) (*domain.Witness, error) {
+		s.progress.mu.Lock()
+		phase := s.progress.active[s.relDir(dir)]
+		s.progress.mu.Unlock()
+		if phase != "scripted / TestPlain" {
+			t.Errorf("active phase = %q", phase)
+		}
+		return nil, probe.ErrNotReproduced
+	}
+	s.registry = probe.NewRegistry(p)
+	if err := s.packages(context.Background(), []string{dir}, 1); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	if !strings.Contains(log.String(), "[done 1/1]") {
+		t.Fatalf("missing completion: %s", log.String())
+	}
+}
 func TestPackagesShareBudgetAndPreservePartial(t *testing.T) {
 	dirs := packageDirs(t)
 	fake := &gotest.Fake{DiscoverFn: func(d string) ([]domain.TestID, error) { return []domain.TestID{{Package: d, Name: "TestPlain"}}, nil }}

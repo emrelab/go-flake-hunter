@@ -3,7 +3,6 @@ package gotest
 import (
 	"bytes"
 	"context"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -36,7 +35,7 @@ func ResolveImportDirs(ctx context.Context, roots []string, tags ...string) (map
 		if len(tags) > 0 {
 			args = append(args, "-tags", strings.Join(tags, ","))
 		}
-		cmd := exec.CommandContext(ctx, "go", append(args, "./...")...)
+		cmd := commandContext(ctx, "go", append(args, "./...")...)
 		cmd.Dir = abs
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout

@@ -1,4 +1,4 @@
-.PHONY: all build test test-short test-repeat lint vuln cost vet fmt cover fixtures clean run smoke demo
+.PHONY: all build test test-short test-repeat lint vuln cost vet fmt cover fixtures clean run smoke demo tui-smoke
 
 BINARY := go-flake-hunter
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -39,6 +39,10 @@ smoke:
 # testdata/fixtures/order-basic. Re-run it when the sample output changes.
 demo: build
 	python3 scripts/make-demo-gif.py
+
+# Real interactive terminal flow; Python stdlib only, Linux/macOS.
+tui-smoke: build
+	python3 scripts/tui-smoke.py --binary ./$(BINARY)
 
 # Using our own tool on ourselves: a state leak would surface here.
 test-repeat:

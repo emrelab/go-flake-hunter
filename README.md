@@ -9,7 +9,7 @@
 
 > Reproduce the flake in 30 seconds instead of 30 minutes — and leave a permanent regression test in the repo.
 
-247 tests + 2 fuzz targets · CI on linux/macos/windows + a nightly sweep · zero dependencies ·
+280 tests + 2 fuzz targets · CI on linux/macos/windows + a nightly sweep · zero dependencies ·
 eight real upstream flake cases reduced to witnesses ([evidence](docs/real-world/README.md))
 
 Fixes found this way are merged upstream: [tailscale/tailscale#22408 and
@@ -214,6 +214,33 @@ earlier scans remain evidence only about those specific scans.
 
 ## Commands
 
+### Interactive terminal
+
+From your Go project, run `go-flake-hunter tui` for the full-screen workspace.
+Running `go-flake-hunter` without arguments also opens it when stdin and stdout
+are interactive terminals; scripts and CI retain the normal command interface.
+
+The four views cover scan setup, searchable findings, live activity and settings.
+Start a scan explicitly, inspect its witness, replay it three times, then preview
+the generated regression test before confirming a write. Confirmed, suspected
+and partial results keep their distinct statuses. Ctrl+C stops the current task
+and preserves any partial evidence; leaving during a task asks for confirmation.
+
+```sh
+go-flake-hunter tui ./... --budget 300 --timeout 10m --jobs 4
+```
+
+Use arrows or `j`/`k`, Enter to select, Tab or `1`–`4` to switch views, `/` to
+filter findings, `r` to replay, `g` to preview a regression and `?` for help.
+The preview's `w` action asks for `y` before writing. On terminals supporting
+bracketed paste, clipboard text only enters editors and cannot trigger actions.
+`q` exits.
+
+Native console support covers Linux, macOS and Windows, with no runtime
+dependencies. `NO_COLOR=1` disables styling. A terminal of at least 60×20 is
+required; the viewport is capped at 240×100. Settings apply to the current
+session. See [the TUI guide](docs/TUI.md) for behavior and validation details.
+
 | Command | What it does | Runs tests? |
 |---|---|---|
 | `hunt <pkg...>` | scans packages, classifies, writes capsules | ✅ |
@@ -222,6 +249,36 @@ earlier scans remain evidence only about those specific scans.
 | `replay [id]` | runs the witness N times, verifies determinism | ✅ |
 | `explain [id]` | renders a capsule as a text/JSON/markdown report | ❌ |
 | `init [dir]` | writes a `.github/workflows/go-flake-hunter.yml` scaffold | ❌ |
+| `doctor [pkg...]` | checks the selected Go toolchain, test package directories and write access | ❌ |
+
+### Terminal and CI output
+
+`go-flake-hunter help <command>` shows examples and options grouped by task.
+Flags work before or after package arguments; `--` marks the end of flags.
+
+`hunt` and `repro` show package progress, the active hypothesis, elapsed time
+and the shared run budget on an interactive terminal. Diagnostics clear the
+live line before printing. CI and redirected text output use ordinary progress
+lines with no terminal control sequences. Choose `--progress plain` for logs
+or `--progress off` for quiet progress. Automatic progress is disabled for
+JSON, Markdown and SARIF; explicit progress still goes to stderr, never into
+the report document.
+
+Text hunts summarize confirmed findings, suspected findings, broken tests and
+packages that could not finish separately. Confirmed, compilable witnesses
+include the exact `compile --verify` command with their capsule and package
+paths. A suspected finding is never summarized as a clean scan.
+
+Before a long scan, run `go-flake-hunter doctor` (a bare command checks `./...`).
+It checks prerequisites without compiling or executing the target tests, probes
+write access with a temporary file that it removes, and reports optional
+Git/race prerequisites.
+Existing capsule directories are checked too. It does not create a capsule
+directory or change configuration. `doctor --format json` emits one
+`go-flake-hunter/doctor/v1` document; failed checks return exit 2, and cancellation
+or a doctor timeout returns exit 130. Its checks do not certify that tests compile or pass.
+Environment checks default to a 30-second timeout; use `doctor --timeout 2m`
+when the selected toolchain needs a download.
 
 Shared flags: `--format text|json|markdown|sarif` · `--budget N` · `--timeout 10m` ·
 `--run-timeout 2m` · `--seeds N` · `--repeat N` · `--capsule-dir DIR` · `--fail-on-flake` · `--race`

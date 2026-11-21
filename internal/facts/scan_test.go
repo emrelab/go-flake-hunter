@@ -352,14 +352,28 @@ func TestScanNamesExternalDependenciesWithoutArguments(t *testing.T) {
  import (clock "time"; web "net/http"; "database/sql"; "math/rand")
  func helper(){ clock.Now(); web.Get("https://secret.example/token"); sql.Open("driver","secret-password"); rand.Intn(4) }
  `
-	if err := os.WriteFile(filepath.Join(dir, "app.go"), []byte(src), 0600); err != nil {
-		t.Fatal(err)
+	for name, body := range map[string]string{
+		"app.go": src,
+		"app_test.go": `package p
+ import ("testing"; clock "time")
+ func TestClock(t *testing.T) { clock.Since(clock.Now()) }
+ `,
+		"excluded.go": `//go:build goflakehunter_excluded
+
+package p
+import "net"
+func excluded() { net.Listen("tcp", "secret-address") }
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	f, err := facts.Scan(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"clock/timing: time.Now", "database: database/sql.Open", "network: net/http.Get", "randomness: math/rand.Intn"}
+	want := []string{"clock/timing: time.Now", "clock/timing: time.Since", "database: database/sql.Open", "network: net/http.Get", "randomness: math/rand.Intn"}
 	if !reflect.DeepEqual(f.ExternalDependencies, want) {
 		t.Fatalf("got %q", f.ExternalDependencies)
 	}

@@ -3,6 +3,7 @@ package gotest
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -25,8 +26,8 @@ func fixture(t *testing.T, name string) string {
 
 func newExec(t *testing.T) *Exec {
 	t.Helper()
-	if _, err := os.Stat("/usr/bin/env"); err != nil {
-		t.Skip("exec unavailable")
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("Go toolchain unavailable")
 	}
 	return &Exec{}
 }

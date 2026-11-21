@@ -18,6 +18,9 @@ import (
 // Store is a directory of capsule JSON files (repo/.go-flake-hunter by default).
 type Store struct{ Dir string }
 
+// MaxCapsuleBytes bounds serialized capsules on both reads and writes.
+const MaxCapsuleBytes = 16 << 20
+
 // NewStore binds a store to a directory; it does not create anything.
 func NewStore(dir string) Store { return Store{Dir: dir} }
 
@@ -74,6 +77,9 @@ func (s Store) Write(c domain.Capsule) (string, error) {
 		return "", fmt.Errorf("%w: %v", domain.ErrInternal, err)
 	}
 	data = append(data, '\n')
+	if len(data) > MaxCapsuleBytes {
+		return "", domain.Wrap(domain.ErrUsage, "capsule exceeds the 16 MiB write limit: %s", final)
+	}
 
 	tmp, err := os.CreateTemp(s.Dir, ".tmp-*.json")
 	if err != nil {
@@ -167,7 +173,14 @@ func (s Store) readFile(name string) ([]byte, error) {
 	if !os.SameFile(info, opened) {
 		return nil, domain.Wrap(domain.ErrUsage, "capsule changed while opening: %s", name)
 	}
-	return io.ReadAll(f)
+	if opened.Size() > MaxCapsuleBytes {
+		return nil, domain.Wrap(domain.ErrUsage, "capsule exceeds the 16 MiB read limit: %s", name)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, MaxCapsuleBytes+1))
+	if err == nil && len(data) > MaxCapsuleBytes {
+		return nil, domain.Wrap(domain.ErrUsage, "capsule exceeds the 16 MiB read limit: %s", name)
+	}
+	return data, err
 }
 
 // List returns the ids in the store, newest file first.

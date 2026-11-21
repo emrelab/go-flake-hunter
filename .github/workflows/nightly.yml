@@ -102,7 +102,6 @@ jobs:
           if [ "${#capsules[@]}" -gt 0 ]; then echo "capsules=true" >> "$GITHUB_OUTPUT"; fi
           if [ "$rc" -eq 4 ]; then
             echo "::warning::full self-hunt ran out of budget — raise --budget/--timeout or file it"
-            exit 0
           fi
           exit "$rc"
       - name: save capsules

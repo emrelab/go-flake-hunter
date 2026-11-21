@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -68,7 +67,7 @@ func expandOne(ctx context.Context, arg string) ([]string, error) {
 		return []string{abs}, nil
 	}
 
-	cmd := exec.CommandContext(ctx, "go", "list", "-e", "-f", "{{.Dir}}", arg)
+	cmd := commandContext(ctx, "go", "list", "-e", "-f", "{{.Dir}}", "--", arg)
 	// `go list` must run inside a module; the caller's cwd is that module.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

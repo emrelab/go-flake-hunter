@@ -34,7 +34,7 @@ func TestGen_%03d_%d(t *testing.T) {
 }
 `, i, j, i)
 		}
-		name := filepath.Join(dir, fmt.Sprintf("gen_%03d_test.go", i))
+		name := filepath.Join(dir, fmt.Sprintf("gen%03d_test.go", i))
 		if err := os.WriteFile(name, []byte(sb.String()), 0o644); err != nil {
 			b.Fatal(err)
 		}

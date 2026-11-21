@@ -65,7 +65,7 @@ func Scan(dir string, active ...domain.PackageFiles) (PkgFacts, error) {
 		if err != nil {
 			continue
 		}
-		file, err := parser.ParseFile(fset, path, src, 0)
+		file, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution)
 		if err != nil {
 			continue
 		}
@@ -131,6 +131,7 @@ func Scan(dir string, active ...domain.PackageFiles) (PkgFacts, error) {
 	}
 
 	f.EnvReads = dedupeSort(f.EnvReads)
+	f.ExternalDependencies = externalDependencies(parsed)
 
 	// Application files: an os.Getenv read that lives in the package's regular
 	// code (the test exercises it through a helper or the API under test) is
@@ -149,10 +150,11 @@ func Scan(dir string, active ...domain.PackageFiles) (PkgFacts, error) {
 		if err != nil {
 			continue
 		}
-		file, err := parser.ParseFile(fset, path, src, 0)
+		file, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution)
 		if err != nil {
 			continue
 		}
+		f.ExternalDependencies = append(f.ExternalDependencies, externalDependencies([]*ast.File{file})...)
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Name == nil || fn.Body == nil {
@@ -177,7 +179,7 @@ func Scan(dir string, active ...domain.PackageFiles) (PkgFacts, error) {
 	for k, vals := range f.EnvValues {
 		f.EnvValues[k] = dedupeSort(vals)
 	}
-	f.ExternalDependencies = externalDependencies(dir, append(testFiles, appFiles...))
+	f.ExternalDependencies = dedupeSort(f.ExternalDependencies)
 	f.ImportPath = files.ImportPath
 	return f, nil
 }

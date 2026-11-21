@@ -9,9 +9,11 @@ make all          # fmt + vet + test + build
 ```
 
 Go 1.24+ is required to build. There are no dependencies; the absence of a
-`go.sum` file is deliberate. CI proves both floors: a real 1.24 toolchain runs
-the unit suite (`-short`), the 1.26 job runs the fixture-driven integration
-suite.
+`go.sum` file is deliberate. CI runs the full race suite on Linux, macOS and
+Windows with Go 1.24 and 1.26. Go 1.25 and 1.27 also run the full suite on
+Linux. Native cancellation and console regressions run repeatedly without the
+Go test result cache. The `synctest-bubble` fixture requires Go 1.26 and is
+compiled in the Go 1.26 jobs; Go 1.24 builds every other fixture.
 
 ## Golden rules
 

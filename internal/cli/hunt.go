@@ -26,7 +26,8 @@ import (
 
 // huntOptions are the flags shared by `hunt` and `repro`.
 type huntOptions struct {
-	format string
+	format   string
+	progress string
 	// sarifPath (--sarif): a SARIF 2.1.0 document is written to this file in
 	// addition to whatever --format prints. The GitHub Action needs both —
 	// markdown for the job summary, SARIF for code scanning — from ONE run;
@@ -51,14 +52,15 @@ type huntOptions struct {
 // addFlags registers the shared flags on fs, so hunt and repro cannot drift
 // apart in name, default or help text.
 func (o *huntOptions) addFlags(fs *flag.FlagSet) {
+	fs.StringVar(&o.progress, "progress", "auto", "progress on stderr: auto|plain|off (auto hides progress for structured formats)")
 	fs.StringVar(&o.format, "format", "text", "output format: text|json|markdown|sarif")
 	fs.StringVar(&o.sarifPath, "sarif", "", "also write a SARIF 2.1.0 document to this file (any --format)")
 	fs.IntVar(&o.repeat, "repeat", probe.DefaultRepeatCount, "repeat count for -count")
 	fs.StringVar(&o.dir, "capsule-dir", "", "capsule directory (default <pkg>/.go-flake-hunter)")
 	fs.IntVar(&o.seeds, "seeds", 0, "shuffle seed count (0 = default 12)")
-	fs.DurationVar(&o.timeout, "timeout", policy.DefaultMaxWall, "total time budget, checked between runs (0 = default 5m; one in-flight run may overshoot by its own --run-timeout)")
+	fs.DurationVar(&o.timeout, "timeout", policy.DefaultMaxWall, "total time budget, checked between runs; 0 uses the default; one in-flight run may overshoot by its own --run-timeout")
 	fs.DurationVar(&o.runTimeout, "run-timeout", 0, "per-run ceiling for one go test (0 = default 2m); raise it for packages whose own suite is slower")
-	fs.IntVar(&o.budget, "budget", policy.DefaultMaxRuns, "total go test run budget (0 = default 1000)")
+	fs.IntVar(&o.budget, "budget", policy.DefaultMaxRuns, "total go test run budget (0 uses the default)")
 	fs.BoolVar(&o.verbose, "v", false, "report every probe in detail")
 	fs.BoolVar(&o.failOnFlake, "fail-on-flake", false, "exit 1 if a flake is found (CI gate)")
 	// --race is NOT a search parameter: classification and shrinking always
@@ -102,11 +104,14 @@ func (o *huntOptions) resolvePolluter(ctx context.Context) error {
 // budget and report identically or the product has three dialects of the same
 // answer.
 type scanner struct {
-	o        huntOptions
-	out      IO
-	registry *probe.Registry
-	runner   gotest.Runner
-	budget   *policy.Budget
+	progress    *scanProgress
+	suspected   int
+	brokenCount int
+	o           huntOptions
+	out         IO
+	registry    *probe.Registry
+	runner      gotest.Runner
+	budget      *policy.Budget
 	// only limits the scan to one test name ("" = every test).
 	only  string
 	found int
@@ -321,6 +326,7 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 		return domain.Wrap(domain.ErrUsage, "%s is not a directory", pkgArg)
 	}
 	relDir := s.relDir(dir)
+	s.progress.update(relDir, "discovering tests")
 	tags := gotest.BuildTags(ctx, dir)
 
 	// Crash leftover: if the previous run was killed, a witness file remains
@@ -358,6 +364,7 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 		return nil
 	}
 
+	s.progress.update(relDir, "analyzing source")
 	files, err := gotest.PackageFiles(ctx, dir, tags)
 	if err != nil {
 		return err
@@ -372,11 +379,12 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 	}
 	for _, t := range tests {
 		s.scanned++
-		res, err := s.registry.Run(ctx, probe.Target{Test: t, Dir: dir, Facts: pkgFacts}, s.runner)
+		res, err := s.registry.Run(ctx, probe.Target{Test: t, Dir: dir, Facts: pkgFacts, Progress: func(phase string) { s.progress.update(relDir, phase+" / "+t.Name) }}, s.runner)
 		s.noteAttempts(res)
 		switch {
 		case errors.Is(err, domain.ErrBrokenTest):
 			s.broken = true
+			s.brokenCount++
 			s.results = append(s.results, domain.PackageResult{Package: t.Package, Test: t.Name, Status: domain.RunBroken})
 			writer := s.out.Stdout
 			if s.o.format == "json" || s.o.format == "sarif" {
@@ -418,6 +426,7 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 		// tells the truth — "scanned in race mode" would not be enough.
 		note := ""
 		if s.o.race && res.Witness.Verification == nil {
+			s.progress.update(relDir, "verifying with race detector / "+t.Name)
 			race, raceNote, rerr := probe.ConfirmRace(ctx,
 				probe.Target{Test: t, Dir: dir, Facts: pkgFacts}, res.Witness, s.runner)
 			if rerr != nil {
@@ -439,6 +448,7 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 			c.Note = "witness reproduced under -race"
 		}
 		if c.Status == domain.StatusSuspected {
+			s.suspected++
 			c.Note = "partial reproduction; not confirmed and excluded from the CI flake gate and baseline"
 		}
 		store := capsule.NewStore(capsuleDir(s.o.dir, dir))
@@ -467,6 +477,9 @@ func (s *scanner) pkg(ctx context.Context, pkgArg string) error {
 		}
 		if err := s.emit(c); err != nil {
 			return err
+		}
+		if (s.o.format == "" || s.o.format == "text") && c.Status == domain.StatusConfirmed && !c.Witness.CrossBinary && !c.Witness.CrossClause {
+			_, _ = fmt.Fprintf(s.out.Stdout, "\n  next: go-flake-hunter compile %s --pkg %s --verify\n", quoteArg(path), quoteArg(dir))
 		}
 		if s.o.verbose {
 			_, _ = fmt.Fprintf(s.out.Stderr, "\n  written: %s\n", path)
@@ -563,6 +576,9 @@ func hunt(ctx context.Context, args []string, out IO) error {
 	if err := validateRunFormat(o.format); err != nil {
 		return err
 	}
+	if err := validateProgress(o.progress); err != nil {
+		return err
+	}
 	if jobs < 1 {
 		return domain.Wrap(domain.ErrUsage, "--jobs must be positive")
 	}
@@ -628,7 +644,10 @@ func hunt(ctx context.Context, args []string, out IO) error {
 		}
 	}
 
+	stopProgress := s.startProgress(len(dirs), "Packages")
+	defer stopProgress()
 	runErr := s.packages(ctx, dirs, jobs)
+	stopProgress()
 	// JSON is one document: keep the findings of an interrupted run inside.
 	if err := s.flush(); err != nil {
 		return err
@@ -652,8 +671,15 @@ func hunt(ctx context.Context, args []string, out IO) error {
 	}
 	// A clean scan is a verdict, not N test-by-test reports: one block, then
 	// exit. -v keeps the per-test detail for "what did it actually try".
-	if (o.format == "" || o.format == "text") && !o.verbose && s.found == 0 && !s.broken {
-		s.writeCleanSummary(out.Stdout, len(dirs))
+	if o.format == "" || o.format == "text" {
+		if !o.verbose && s.found == 0 && s.suspected == 0 && !s.broken {
+			s.writeCleanSummary(out.Stdout, len(dirs))
+		} else {
+			_, _ = fmt.Fprintf(out.Stdout, "\nScan summary: %d confirmed, %d suspected, %d broken; %d packages incomplete\n  %d tests, %d/%d runs, %s\n", s.found, s.suspected, s.brokenCount, len(s.skipped), s.scanned, s.budget.Runs(), s.budget.MaxRuns, time.Since(s.started).Round(time.Millisecond))
+			for _, skipped := range s.skipped {
+				_, _ = fmt.Fprintf(out.Stdout, "  incomplete: %s\n", skipped)
+			}
+		}
 	}
 	// The gate speaks first: a run that found a flake has something to act on
 	// even when another package was skipped. Otherwise the skipped packages
@@ -934,6 +960,11 @@ func reorderFlags(fs *flag.FlagSet, args []string) []string {
 	var flags, positional []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
+		if a == "--" {
+			flags = append(flags, "--")
+			positional = append(positional, args[i+1:]...)
+			break
+		}
 		if strings.HasPrefix(a, "-") && a != "-" {
 			flags = append(flags, a)
 			// A flag written as "-name value" takes the next token with it.
