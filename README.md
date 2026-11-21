@@ -61,14 +61,14 @@ linux and darwin (amd64/arm64), windows (amd64), each published with a
 `SHA256SUMS` file.
 
 ```sh
-# latest release (v0.3.0), linux-amd64 — swap the suffix for your platform
-curl -fsSLO https://github.com/emrelab/go-flake-hunter/releases/download/v0.3.0/go-flake-hunter-0.3.0-linux-amd64
-curl -fsSLO https://github.com/emrelab/go-flake-hunter/releases/download/v0.3.0/SHA256SUMS
+# latest release (v0.4.0), linux-amd64 — swap the suffix for your platform
+curl -fsSLO https://github.com/emrelab/go-flake-hunter/releases/download/v0.4.0/go-flake-hunter-0.4.0-linux-amd64
+curl -fsSLO https://github.com/emrelab/go-flake-hunter/releases/download/v0.4.0/SHA256SUMS
 sha256sum -c --ignore-missing SHA256SUMS
-chmod +x go-flake-hunter-0.3.0-linux-amd64 && mv go-flake-hunter-0.3.0-linux-amd64 go-flake-hunter
+chmod +x go-flake-hunter-0.4.0-linux-amd64 && mv go-flake-hunter-0.4.0-linux-amd64 go-flake-hunter
 
 # or build it yourself (Go 1.24+)
-go install github.com/emrelab/go-flake-hunter/cmd/go-flake-hunter@v0.3.0
+go install github.com/emrelab/go-flake-hunter/cmd/go-flake-hunter@v0.4.0
 ```
 
 On Windows, save the Windows amd64 executable in a directory on
@@ -78,7 +78,7 @@ run the `go install` command above and add the output directory from
 under `go env GOPATH`.
 
 The GitHub Action prefers the prebuilt binary of the tag it is pinned to and
-falls back to building its own source, so `@v0.3.0` needs no toolchain setup
+falls back to building its own source, so `@v0.4.0` needs no toolchain setup
 beyond `actions/setup-go`.
 
 ## First 5 minutes
@@ -411,7 +411,7 @@ the same name as the repository, so the listing and the `uses:` line below
 match.
 
 ```yaml
-- uses: emrelab/go-flake-hunter@v0.3.0
+- uses: emrelab/go-flake-hunter@v0.4.0
   with:
     paths: ./...
     format: markdown
