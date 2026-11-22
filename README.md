@@ -49,6 +49,12 @@ flaky. go-flake-hunter hands you a test file that stays red until the cause is g
 
 ![go-flake-hunter in action](docs/go-flake-hunter-demo.gif)
 
+The same findings in the interactive workspace — `go-flake-hunter tui ./...` —
+captured from a real terminal session: scan, filter, replay, preview the
+regression test ([TUI guide](docs/TUI.md)):
+
+![go-flake-hunter TUI](docs/tui-demo.gif)
+
 Changing the order requires a temporary witness file, because in Go
 `go test -run '^(TestA|TestB)$'` runs in **source order** — the regex order
 changes nothing (verified, Go 1.26.2). Zero external dependencies: one binary,

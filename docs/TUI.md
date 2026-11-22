@@ -82,5 +82,6 @@ Go unit tests cover fragmented terminal input, Unicode editing,
 secret-output suppression, stale preview rejection and bounded buffers.
 
 To render real terminal captures, install Pillow in a temporary environment
-and run `scripts/tui-smoke.py --binary ./go-flake-hunter --preview-dir /tmp/tui`.
+and run `scripts/tui-smoke.py --binary ./go-flake-hunter --preview-dir /tmp/tui`;
+`make tui-demo` writes the README's GIF the same way.
 Pillow is optional and is not needed to build or run the application.
